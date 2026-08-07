@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+.next/
+out/
+dist/
+build/
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Letta local state
+.letta-local/
+~/.letta/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Misc
+coverage/
+.nyc_output/
+*.tsbuildinfo
