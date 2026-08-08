@@ -1,87 +1,78 @@
 # Tech Stack — Project Tony
 
 ## 1. Ringkasan
-Tony dibangun di atas **Letta** (Apache 2.0) sebagai otak agen, **"Tony UI"** (frontend yang kita
-bangun) sebagai wajah, dan akan menyerap **Activepieces** (MIT) sebagai mesin otomasi di Fase 2.
+Tony berjalan **murni di atas Letta Code** (Apache 2.0) sebagai otak asisten dan interface CLI.
+Tidak ada frontend custom, tidak ada Agent SDK aplikasi, dan komponen otomasi (Fase 2) masih
+**dievaluasi**.
 
-## 2. Stack Fase 1 — Letta (agen stateful)
+## 2. Stack Fase 1 — Letta Code (agen stateful + CLI)
 
 ### 2.1 Runtime & Install
 | Komponen | Teknologi | Alasan |
 |----------|-----------|--------|
-| Harness / CLI | **`@letta-ai/letta-code`** (npm, Node 22.19+) | Cara resmi menjalankan Letta |
+| Harness / CLI | **`@letta-ai/letta-code`** (npm, Node 22.19+) | Cara resmi menjalankan Letta; CLI interaktif |
+| Runtime package | **Bun** (bun.lock, bundling internal) | Package manager/build resmi proyek Letta |
 | Native deps | **Python 3 + make + g++** | Diperlukan saat instalasi (compile native) |
-| App Server | `letta server --backend local --listen ws://0.0.0.0:4500` | Self-host runtime + WebSocket API |
-| Model inference | Provider via CLI: OpenAI, Anthropic, Ollama, LM Studio, dsb. | Model-agnostic |
+| App Server (opsional) | `letta server --backend local --listen ws://127.0.0.1:4500` | Always-on / akses jarak jauh via SSH |
+| Model inference | Provider via CLI: OpenAI, Anthropic, Ollama, LM Studio, dsb. | Model-agnostic (`/connect`, `/model`) |
 | Storage | **MemFS** (git-based memori agen) di `~/.letta/...` | State & memori lokal, mudah di-backup |
 
 ### 2.2 Lisensi
 - **Apache 2.0** — permissive: komersial, modifikasi, distribusi, turunan berbayar diizinkan;
   hanya perlu atribusi/NOTICE.
 
-## 3. Stack Fase 1 — "Tony UI" (dibangun)
-| Komponen | Teknologi | Alasan |
-|----------|-----------|--------|
-| Frontend | **React + Next.js (App Router) + TypeScript** | Modern, kuat, SEO/SSR |
-| Integration | **`@letta-ai/letta-agent-sdk`** (TypeScript) | Antarmuka resmi ke App Server (remote backend) |
-| Styling | Tailwind CSS / CSS Modules | Fleksibel & cepat |
-| State | React Query / Zustand | Manajemen state chat & streaming |
-| Lisensi | Milik kita (disarankan MIT saat dipublikasikan) | Open-source |
+## 3. Interface (Fase 1)
+| Interface | Status | Catatan |
+|-----------|--------|---------|
+| **CLI interaktif** (`letta`) | ✅ Jalur utama | Chat, `/connect`, `/model`, `/new`, `/agent` |
+| Channels (Telegram/Slack/Discord/WhatsApp/Signal) | 📋 Opsi first-party | Di luar scope Fase 1; tanpa kode custom |
+| Desktop app Letta | 📋 Opsi first-party | Branding Letta; di luar scope |
+| chat.letta.com (web/mobile) | ❌ Cloud-only | Tidak bisa dipakai untuk agent self-hosted |
+| UI custom / Agent SDK | ❌ Ditunda | Kebutuhan kecil; diputuskan belakangan |
 
-## 4. Stack Fase 2 — Activepieces (mesin otomasi)
-| Komponen | Teknologi | Alasan |
-|----------|-----------|--------|
-| Bahasa | TypeScript | Selaras dengan UI |
-| Backend | Fastify (Node) + BullMQ | Ringan, performa |
-| Frontend | React + Tailwind | Konsisten |
-| Data | PostgreSQL + Redis | Antrian & penyimpanan flow |
-| Integrasi | 700+ Pieces + **MCP Server** | Jembatan ke Tony via MCP |
-| Lisensi | **MIT** | Permissive |
+## 4. Stack Fase 2 — Otomasi ("tangan", **belum diputuskan**)
+Kandidat yang sedang dievaluasi di `10-eval-activepieces.md`:
+| Kandidat | Stack | Lisensi | Catatan |
+|----------|-------|---------|---------|
+| Activepieces | TypeScript/Fastify/BullMQ, PostgreSQL+Redis, React+Tailwind | **MIT (CE)** + komersial (fitur enterprise) | MCP native; kandidat terdepan |
+| n8n | TypeScript, MySQL/Postgres | Fair-code (Sustainable Use) | Bukan fully open-source |
+| Dify | Python/Flask, Postgres, Vue | Modified Apache 2.0 (pembatasan multi-tenant/logo) | Lebih ke "otak", bukan "tangan" |
+| Make / Zapier | — | Proprietary | Cloud-only |
 
-## 5. Integrasi Jembatan (Letta ↔ Activepieces)
-- Letta Agent SDK mendukung **MCP server & tools** (`docs.letta.com/agent-sdk/mcp`).
-- Activepieces menyediakan **MCP server** bawaan (`https://<host>/mcp`).
-- Merencanakan: Tony (Letta agent) memakai **MCP tools** yang menunjuk ke Activepieces MCP server,
-  sehingga Tony bisa membuat/menjalankan flow secara natural language.
+## 5. Integrasi Jembatan (Fase 2, bila diputuskan)
+- Letta mendukung **MCP client/tools**.
+- Activepieces menyediakan **MCP server** bawaan — potensi jembatan natural.
+- Keputusan akhir belum diambil; tergantung hasil evaluasi.
 
 ## 6. Infrastruktur Deployment
 | Komponen | Teknologi | Keterangan |
 |----------|-----------|-----------|
-| Container | Docker + Docker Compose | Orkestrasi frontend & (kelak) Activepieces |
-| Runtime service | systemd atau Docker untuk `letta server` | App Server selalu hidup |
-| Reverse proxy | **Nginx** | TLS + routing domain |
-| TLS | Certbot / Let's Encrypt | HTTPS |
-| Node.js | 22.19+ | Untuk CLI & frontend |
+| App Server (opsional) | systemd atau Docker `letta server` | Selalu hidup di VPS |
+| Reverse proxy | — | Tidak dibutuhkan Fase 1 (tanpa web) |
+| Node.js | 22.19+ | CLI & harness |
+| Backup | cron/rsync `~/.letta` | State & memori |
 
 ## 7. Desain Monorepo
 ```
 tony/                              # = D:\Projects\Tony
-├── apps/
-│   ├── ui/                        # "Tony UI" (Next.js)        [Fase 1]
-│   ├── letta/                     # script/service untuk App Server [Fase 1]
-│   └── activepieces/              # (Fase 2)
-├── packages/
-│   └── shared/                    # tipe & utilitas bersama (opsional)
-├── infra/                         # docker-compose, nginx config, env contoh
+├── letta-code/                    # source Letta Code (vendor, untuk referensi/dev)
 ├── docs/                          # dokumentasi (file ini)
-└── package.json / pnpm-workspace.yaml
+└── README.md
 ```
-> Catatan: Letta berjalan sebagai service mandiri (klik/App Server), bukan package pnpm. "Tony UI"
-> adalah workspace pnpm; Activepieces ditambahkan sebagai workspace pada Fase 2.
+> Tidak ada workspace pnpm untuk Fase 1 — Tony tidak membangun aplikasi sendiri saat ini.
+> `apps/`, `packages/`, `infra/` akan dibuat hanya bila benar-benar diperlukan.
 
 ## 8. Tooling Pendukung
 | Tool | Peran |
 |------|-------|
 | Git | Version control |
-| pnpm | Package manager monorepo |
-| Node 22.19+ | Runtime frontend & Letta CLI |
-| Docker Compose | Local & prod |
-| Nginx + Certbot | Proxy & TLS |
+| Node 22.19+ | Runtime Letta Code CLI |
+| Python/make/g++ | Native deps saat instalasi |
+| Docker/systemd (opsional) | App Server selalu-hidup |
 
 ## 9. Justifikasi Pilihan Kunci
-- **Letta (Apache 2.0):** lisensi permissive + kemampuan memori/learning yang membedakan Tony
-  sebagai "asisten yang beringatan".
-- **Activepieces (MIT):** otomasi AI-first, MCP native, 700+ integrasi.
-- **"Tony UI" custom:** karena web app Letta (`chat.letta.com`) tidak dapat di-self-host, bisogno
-  frontend sendiri agar branding & kontrol penuh.
-- **MCP sebagai jembatan:** standar terbuka yang didukung kedua belah pihak.
+- **Letta Code (Apache 2.0):** lisensi permissive + kemampuan memori/learning yang membedakan
+  Tony sebagai "asisten yang beringatan", sekaligus menyediakan CLI siap-pakai → **tanpa perlu
+  membangun frontend**.
+- **Tanpa UI custom:** kebutuhan interface kecil; Letta punya CLI & interface first-party lain.
+- **Otomasi ditunda:** menghindari komitmen sebelum keputusan lisensi/arsitektur matang.

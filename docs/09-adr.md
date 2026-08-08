@@ -1,6 +1,7 @@
 # Architecture Decision Records (ADR) — Project Tony
 
-> Format: [Status] — Judul. Status: `Accepted` (disetujui) / `Proposed` / `Superseded`.
+> Format: [Status] — Judul. Status: `Accepted` (disetujui) / `Proposed` (diusulkan) /
+> `Superseded` (digantikan) / `Under review` (sedang dievaluasi).
 > Tanggal ditetapkan sesuai iterasi perencanaan project Tony.
 
 ---
@@ -19,90 +20,99 @@
   - Bebas dipakai, dimodifikasi, didistribusikan, dan dijadikan basis turunan berbayar (dgn atribusi).
   - Kemampuan memori/learning membedakan Tony dari asisten chat biasa.
 - **Konsekuensi (kontra):**
-  - Tidak ada UI chat siap-pakai (seperti LobeChat) → perlu membangun "Tony UI" (lihat ADR-003).
-  - Stack Letta (Node/Python) berbeda dari stack LobeHub (Next.js inti); arsitektur dirombak.
+  - Tidak ada web chat siap-pakai yang self-hostable (lihat ADR-010 → solusi: CLI).
 - **Alternatif yang dinilai:** LobeHub (Community License — ditolak), Open WebUI (lisensi + syarat
   mempertahankan branding — ditolak), LibreChat (MIT — baik, tapi tanpa memori native sebagus Letta).
 
-## ADR-002 — Kombinasi fondasi permissive: Letta (Apache 2.0) + Activepieces (MIT)
+## ADR-002 — Fondasi permissive: Letta (Apache 2.0) + komponen otomasi (sedang dievaluasi)
 
-- **Status:** Accepted
-- **Konteks:** Tujuan project menuntut seluruh komponen bebas dari lisensi restriktif.
-- **Keputusan:** Bangun Tony di atas **Letta (Apache 2.0)** untuk otak agen dan **Activepieces
-  (MIT)** untuk mesin otomasi/aksi.
+- **Status:** Under review
+- **Konteks:** Awalnya direncanakan **Activepieces (MIT)** sebagai mesin otomasi/aksi. Setelah
+  riset, lisensi Activepieces adalah **dual-license** (CE MIT + fitur enterprise komersial), dan
+  ada beberapa kandidat lain (n8n, Dify, dsb.).
+- **Keputusan:** Fondasi "otak" tetap **Letta (Apache 2.0)**. Pilihan komponen "tangan" (Fase 2)
+  **belum final** — dibandingkan di `10-eval-activepieces.md`.
 - **Konsekuensi:**
-  - Pro: Seluruh stack komersial-friendly, open-source, dan mendukung turunan berbayar.
-  - Kontra: Wajib mematuhi syarat atribusi Apache 2.0 dan menyertakan lisensi komponen.
+  - Pro: Keputusan berbasis evaluasi; stack komersial-friendly.
+  - Kontra: Wajib mematuhi syarat atribusi Apache 2.0 dan lisensi komponen terpilih.
 
-## ADR-003 — Membangun "Tony UI" web custom (React + Next.js) di atas Letta Agent SDK
+## ADR-003 — Membangun "Tony UI" web custom (React + Next.js) — **SUPERSEDED**
 
-- **Status:** Accepted
-- **Konteks:** Web app Letta (`chat.letta.com`) adalah layanan cloud dan **tidak dapat
-  di-self-host**. Tanpa frontend, Tony tidak punya antarmuka web yang dapat di-branding.
-- **Keputusan:** Bangun frontend web sendiri, **"Tony UI"** (React + Next.js + TypeScript),
-  terhubung ke Letta App Server melalui **Letta Agent SDK** (remote backend).
-- **Konsekuensi:**
-  - Pro: Kontrol penuh atas branding "Tony", UI, dan data.
-  - Kontra: Effort pengembangan frontend; menjadi tanggung jawab tim Tony.
+- **Status:** Superseded (digantikan ADR-010)
+- **Konteks:** Rencana awal membuat frontend web sendiri untuk branding.
+- **Keputusan:** ~~Bangun "Tony UI" (React + Next.js) di atas Letta Agent SDK~~ **dibatalkan**.
+- **Alasan superseded:** Interface Fase 1 = **Letta CLI murni**; kebutuhan UI kecil; Letta punya
+  interface first-party lain (channels/desktop) yang bisa dipakai tanpa kode custom.
+- **Konsekuensi:** Tidak ada effort pengembangan frontend di Fase 1; branding khusus ditunda.
 
-## ADR-004 — Pemisahan peran: Otak (Letta) / Wajah (Tony UI) / Tangan (Activepieces)
+## ADR-004 — Pemisahan peran: Otak (Letta) / (kelak) Tangan (otomasi)
 
-- **Status:** Accepted
+- **Status:** Accepted (revisi — tanpa layer "Wajah")
 - **Konteks:** Menghindari monolit dan memudahkan evolusi.
-- **Keputusan:** Arsitektur modular tiga lapis dengan jembatan jelas:
-  - Otak: Letta (memori, agen, eksekusi).
-  - Wajah: Tony UI (interaksi pengguna).
-  - Tangan: Activepieces (aksi/otomasi) — Fase 2.
+- **Keputusan:** Arsitektur modular dengan jembatan jelas:
+  - Otak: Letta (memori, agen, eksekusi) + interface CLI.
+  - Tangan: komponen otomasi/aksi — Fase 2 (belum dipilih).
+  - ~~Wajah/UI custom~~ dihapus (ADR-010).
 - **Konsekuensi:** Boundary jelas → mudah diuji, di-maintain, dan diganti per-komponen.
 
-## ADR-005 — Jembatan integrasi Letta ↔ Activepieces via MCP (Model Context Protocol)
+## ADR-005 — Jembatan integrasi Letta ↔ otomasi via MCP (Model Context Protocol)
 
-- **Status:** Proposed (untuk Fase 2)
+- **Status:** Proposed (Fase 2 — menunggu keputusan komponen)
 - **Konteks:** Ingin Tony mampu bertindak (bukan sekadar chat).
-- **Keputusan:** Hubungkan Letta agent (yang mendukung **MCP client**) ke **Activepieces MCP
-  server** (`/mcp`). Tony memakai tool MCP untuk membuat/menjalankan flow, mengelola tabel, dsb.
-  Webhook sebagai jalur sekunder untuk skenario event-driven.
-- **Konsekuensi:** Standar terbuka yang didukung kedua pihak; perlu konfigurasi MCP + auth.
+- **Keputusan (potensial):** Hubungkan Letta agent (yang mendukung **MCP client/tools**) ke
+  komponen otomasi. Bila terpilih Activepieces: gunakan **Activepieces MCP server** (`/mcp`).
+- **Konsekuensi:** Standar terbuka yang didukung pihak terkait; perlu konfigurasi MCP + auth.
 
-## ADR-006 — Monorepo terpadu (pnpm)
+## ADR-006 — Monorepo terpadu (git)
 
 - **Status:** Accepted
-- **Konteks:** Seluruh komponen (UI, service, kelak Activepieces) satu project.
-- **Keputusan:** Repository monorepo dengan pnpm workspaces; `apps/ui`, `apps/letta`,
-  `apps/activepieces`, `packages/shared`.
-- **Konsekuensi:** Satu toolchain, satu source of truth, deploy terpadu; butuh disiplin boundary.
+- **Konteks:** Seluruh komponen (source Letta + kelak otomasi) satu project.
+- **Keputusan:** Repository monorepo; `letta-code/` (vendor source), `docs/`, `README.md`.
+  Workspace pnpm dibuat **hanya bila** ada aplikasi sendiri (saat ini tidak).
+- **Konsekuensi:** Satu source of truth, deploy terpadu; disiplin boundary.
 
 ## ADR-007 — App Server Letta tidak diekspos ke publik
 
 - **Status:** Accepted
-- **Konteks:** App Server punya akses filesystem & shell; token jangan jatuh ke browser.
-- **Keputusan:** App Server hanya berjalan di `127.0.0.1:4500` (internal); "Tony UI"/backend memegang
-  token dan berbicara atas nama user; Nginx hanya mengekspos UI.
+- **Konteks:** App Server punya akses filesystem & shell; credential jangan jatuh ke publik.
+- **Keputusan:** App Server (bila dipakai) hanya berjalan di `127.0.0.1:4500` (internal);
+  diakses via SSH/CLI, bukan langsung dari internet.
 - **Konsekuensi:** Lebih aman; arsitektur klien-server yang benar.
 
-## ADR-008 — Bentuk "Tony UI"
+## ADR-008 — Bentuk "Tony UI" — **SUPERSEDED**
 
-- **Status:** Proposed (asumsi untuk iterasi ini)
-- **Konteks:** Keputusan final bentuk UI masih terbuka.
-- **Asumsi/opsi:**
-  - **(a) Web chat custom (React/Next)** — disarankan; branding penuh, multi-user, via Agent SDK.
-  - (b) Desktop app Letta — cepat mulai, branding terbatas.
-  - (c) Saluran chat (Slack/Telegram/Discord) — fokus integrasi, tanpa frontend sendiri.
-- **Keputusan awal:** **Opsi (a)** sebagai arah utama; (b)/(c) sebagai pelengkap/integrasi.
-- **Konsekuensi:** Menentukan scope frontend Fase 1. Perlu konfirmasi final dari pemilik project.
+- **Status:** Superseded (digantikan ADR-010)
+- **Konteks:** Opsi bentuk interface/UI sebelumnya (web custom / desktop / saluran chat).
+- **Keputusan:** ~~Opsi (a) web chat custom~~ **dibatalkan**; interface = CLI (ADR-010).
+  Opsi channels/desktop tetap tersedia sebagai pelengkap bila dibutuhkan nanti.
 
 ## ADR-009 — Penyimpanan state & memori agen via MemFS Letta + backup
 
 - **Status:** Accepted
 - **Konteks:** Memori Tony adalah aset inti yang harus persisten & aman.
-- **Keputusan:** Gunakan mekanisme MemFS default Letta (`~/.letta/...`); jadwalkan backup; set
-  `LETTA_LOCAL_BACKEND_DIR` agar terisolasi & mudah dipindahkan.
+- **Keputusan:** Gunakan mekanisme MemFS default Letta (`~/.letta`); jadwalkan backup.
 - **Konsekuensi:** Persistensi terjamin; perlu strategi backup & pemulihan.
+
+## ADR-010 — Interface Fase 1 = Letta CLI murni; tanpa komponen tambahan
+
+- **Status:** Accepted
+- **Tanggal:** 2026-08
+- **Konteks:** Kebutuhan interface/UI sangat kecil; project menolak kompleksitas tambahan
+  (UI custom, Agent SDK, frontend web) sebelum benar-benar diperlukan.
+- **Keputusan:**
+  - Fase 1 memakai **Letta Code murni**, interface utama = **CLI** (`letta`).
+  - **Tidak ada** komponen tambahan: no UI custom, no Agent SDK, no frontend.
+  - Interface first-party lain (channels/desktop) tercatat sebagai opsi, **di luar scope**.
+- **Konsekuensi:**
+  - Pro: Scope kecil, cepat live, tanpa effort frontend.
+  - Kontra: Tanpa antarmuka web sendiri; branding khusus ditunda.
+- **Referensi:** riset interface Letta di `07-context.md` (CLI/channels/desktop/web-chat-cloud).
 
 ---
 
 ## Lampiran: Alur Keputusan
 1. Evaluasi lisensi (LobeHub ✗ → Letta/Open WebUI/LibreChat).
-2. Pilih Letta (Apache 2.0) + Activepieces (MIT) karena memenuhi seluruh tujuan.
-3. Rancang arsitektur 3-lapis + UI custom + MCP bridge.
-4. Documentasikan, inisialisasi git, lalu deploy Fase 1.
+2. Pilih Letta (Apache 2.0) sebagai otak.
+3. Putuskan interface Fase 1 = CLI murni, tanpa komponen tambahan (ADR-010).
+4. Evaluasi komponen otomasi Fase 2 (`10-eval-activepieces.md`) sebelum integrasi.
+5. Documentasikan, inisialisasi git, lalu eksekusi Fase 1.

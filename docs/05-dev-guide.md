@@ -1,100 +1,105 @@
 # Panduan Developer (Dev Guide) — Project Tony
 
-> Fokus Fase 1: menjalankan **Letta** lokal dan mengembangkan **"Tony UI"** di atas Agent SDK.
+> Fokus Fase 1: menjalankan **Letta Code murni** — install, hubungkan LLM, buat agen "Tony",
+> dan verifikasi memori — **tanpa membangun UI/frontend tambahan**.
 
 ## 1. Prasyarat Lokal
 - **Git**
 - **Node.js 22.19+** (`node --version`)
-- **pnpm** (`corepack enable`)
-- **Python 3 + make + g++** (untuk native deps Letta)
-- **Docker Desktop + Docker Compose** (opsional untuk prod)
+- **Python 3 + make + g++** (untuk native deps Letta saat install)
+- **Docker/systemd** (opsional, untuk App Server selalu-hidup)
 
-## 2. Setup Lokal Per-Komponen
+## 2. Setup Lokal
 
-### 2.1 Install Letta CLI + App Server
+### 2.1 Install Letta Code CLI
 ```powershell
 # install CLI (compile native -> butuh python/make/g++)
 npm install -g @letta-ai/letta-code
+```
 
-# koneksi LLM provider (contoh: OpenAI)
-letta --backend local connect openai --api-key "<KEY>"
+### 2.2 Jalankan CLI & buat agen "Tony"
+```powershell
+# buka direktori kerja, lalu:
+letta
+```
+- Pertama kali dijalankan, agen lokal dibuat otomatis; state tersimpan lokal, **tanpa login**.
+- Bisa juga membuat agen baru dengan preset tertentu:
+```powershell
+letta --new-agent --personality tutorial   # agen demo
+```
+- Slash commands utama di dalam CLI:
+  - `/connect` — hubungkan LLM provider (OpenAI/ChatGPT, Anthropic, Ollama, LM Studio, Z.ai, dll)
+  - `/model` — pilih model
+  - `/new` — mulai percakapan baru · `/resume` — lanjut percakapan
+  - `/agent` — pindah/ganti agen · `/search` — cari pesan/agen · `/help` — bantuan
+  - `/skills` — lihat skills · `/palace`, `/doctor`, `/sleeptime` — audit/manajemen memori
+- **Headless / non-interaktif:**
+```powershell
+letta -p --agent <agent-id> "pesan"          # kirim pesan satu kali
+letta --agent <agent-id>                     # lanjut agent tertentu
+```
 
-# jalankan App Server lokal (dev)
+### 2.3 Verifikasi memori lintas percakapan
+```powershell
+# 1) Ceritakan sesuatu ke Tony, lalu catat jawabannya
+# 2) Keluar (Ctrl+D), jalankan letta lagi, lalu /new untuk percakapan baru
+# 3) Tanyakan: "Apa yang kuceritakan tadi?" -> harus diingat Tony
+```
+Opsional, cek state memori via subcommand:
+```powershell
+letta memory status --agent <agent-id>
+letta memory diff --agent <agent-id>
+```
+
+### 2.4 App Server (opsional — selalu-hidup / remote)
+```powershell
 letta server --backend local --listen ws://127.0.0.1:4500
 ```
-- Verifikasi: proses menampilkan base URL & channel URLs.
-- State/memori tersimpan di `~/.letta/lc-local-backend` (MemFS).
+- Proses mencetak base URL saat start.
+- State/memori tersimpan di `~/.letta` (MemFS, git-backed).
+- > **Windows:** pastikan `python`, `make` (via mingw/choco), dan `g++` tersedia; atau gunakan
+  > WSL/Docker untuk kemudahan.
 
-> **Windows:** pastikan `python`, `make` (via mingw/choco), dan `g++` tersedia; atau gunakan
-> WSL/Docker untuk kemudahan.
-
-### 2.2 Siapkan "Tony UI" (Next.js)
-```bash
-# pada monorepo
-pnpm install
-cd apps/ui
-pnpm dev        # http://localhost:3000
+## 3. Struktur Repo
+```
+tony/
+├── letta-code/        # source Letta Code (vendor, untuk referensi/riset)
+├── docs/              # dokumentasi project
+└── README.md
 ```
 
-### 2.3 Koneksi UI → App Server (via Agent SDK)
-```ts
-// apps/ui/lib/letta.ts
-import { LettaAgentClient } from '@letta-ai/letta-agent-sdk';
-
-export const letta = new LettaAgentClient({
-  backend: 'remote',
-  url: process.env.LETTA_APP_SERVER_URL,      // ws://127.0.0.1:4500 (dev)
-  authToken: process.env.LETTA_APP_SERVER_TOKEN,
-});
-// buat agen "Tony", resume session, stream pesan
-```
-
-## 3. Struktur UI "Tony"
-```
-apps/ui/
-├── app/               # routing Next.js (App Router)
-│   ├── layout.tsx     # branding Tony (header, judul)
-│   └── page.tsx       # chat utama
-├── components/
-│   ├── Chat/          # kanvas chat, message list, input
-│   └── Branding/      # logo, tema, warna "Tony"
-└── lib/letta.ts       # wrapper Agent SDK
-```
-
-## 4. Branding "Tony" (kita kontrol penuh)
-Karena UI milik kita: ganti nama, logo, favicon, warna, judul halaman bebas — **tanpa kendala
-lisensi**. Letakkan aset di `apps/ui/public/` dan atur di `layout.tsx`/`manifest.ts`.
+## 4. Interface Lain (di luar scope Fase 1)
+Letta Code punya interface **first-party** tanpa kode custom — dicatat di sini untuk referensi:
+- **Channels:** `letta server --backend local --channels telegram` (juga slack, discord,
+  whatsapp, signal) → chat dari aplikasi pesan yang sudah dipakai.
+- **Desktop app** (Windows/macOS/Linux) — branding Letta.
+- **chat.letta.com** — **cloud-only**, tidak bisa dipakai untuk agent self-hosted.
+Keputusan memakai interface tambahan ditunda (ADR-010).
 
 ## 5. Konvensi Kode & Workflow
-- **Package manager:** pnpm (monorepo).
-- **Frontend:** React 19 + Next.js + TypeScript; ikuti konvensi App Router.
-- **Format/lint:** ESLint + Prettier (config di root).
 - **Commit:** conventional commits (`feat:`, `fix:`, `docs:`).
-- **Test:** Vitest/Jest untuk unit; Playwright (opsional) untuk e2e UI.
+- **Dokumentasi:** setiap keputusan baru → tambah ADR (`docs/09-adr.md`).
 
-## 6. Menjalankan Test & Validasi
-```bash
-pnpm test        # unit test UI
-pnpm lint        # lint
-pnpm build       # production build UI
-# uji manual: chat dengan Tony, cek memori lintas sesi
-```
+## 6. Validasi (Fase 1)
+- [ ] `letta` berjalan & LLM terhubung (`/connect`)
+- [ ] Chat interaktif berfungsi
+- [ ] Memori lintas sesi terverifikasi (poin 2.3)
+- [ ] (Opsional) App Server `letta server` hidup
+- [ ] (Opsional) Backup `~/.letta` terjadwal
 
 ## 7. Troubleshooting Umum
 | Masalah | Solusi |
 |---------|--------|
 | `letta` tidak dikenali | `npm install -g @letta-ai/letta-code`; cek PATH |
 | Gagal compile native | Install python3/make/g++; coba WSL/Docker |
-| UI tak bisa hubungi App Server | Pastikan URL & token benar; App Server hidup |
-| Memori hilang setelah restart | Backup `~/.letta/...`; pastikan volume/service persisten di prod |
-| Port bentrok | Ubah port di env/script |
+| Model tidak merespons | `/connect` ulang; cek API key; `/model` ganti model |
+| Memori hilang setelah restart | Pastikan `~/.letta` tidak terhapus; backup rutin |
+| Port bentrok | Ubah port di flag `--listen` |
 
 ## 8. Catatan Keamanan
-- Jangan ekspos App Server ke publik langsung.
-- Token App Server berada di **backend/UI**, bukan di kode browser.
-- Secret disimpan di `.env` (jangan di-commit).
+- Jangan expose App Server ke publik langsung.
+- API key disimpan aman (keyring / `.env` lokal, jangan di-commit).
 
 ## 9. Catatan Lisensi
 - Letta: **Apache 2.0** — sertakan atribusi/NOTICE bila mendistribusikan.
-- "Tony UI": milik kita; disarankan **MIT** bila dipublikasikan.
-- Activepieces (Fase 2): **MIT**.
+- Komponen otomasi (Fase 2): belum diputuskan (lihat `10-eval-activepieces.md`).

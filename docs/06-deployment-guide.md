@@ -1,48 +1,46 @@
-# Panduan Deployment — Project Tony (Fase 1: VPS + Nginx)
+# Panduan Deployment — Project Tony (Fase 1: Letta Code + App Server opsional)
 
-> Target: deploy **"Tony UI"** + **Letta App Server** di **VPS** dengan **domain sendiri** & **HTTPS**.
-> Activepieces ditambahkan di Fase 2.
+> Target: menjalankan **Letta Code** secara **self-hosted** dengan interface **CLI**.
+> Tidak ada frontend/domain/HTTPS pada Fase 1 — Nginx/Certbot hanya relevan bila nanti ada
+> interface web/channel (di luar scope saat ini).
 
 ## 1. Prasyarat Server (VPS)
 - OS Linux (Ubuntu 22.04/24.04 disarankan)
-- CPU 2+ core, RAM 4 GB+, disk 20 GB+ (SSD)
-- **Docker + Docker Compose v2** (untuk UI) **dan/atau systemd** (untuk App Server)
+- CPU 1–2 core, RAM 2 GB+ (bertambah bila memakai model lokal)
 - **Node.js 22.19+**, **Python 3**, **make**, **g++**
-- **Domain** (A record → IP VPS)
-- Port 80 & 443 terbuka
+- **Docker + Docker Compose** **dan/atau systemd** (untuk App Server selalu-hidup)
+- Akses SSH ke server
 
 ```bash
 sudo apt update
-sudo apt install -y nginx docker.io docker-compose-v2 git nodejs npm python3 build-essential
+sudo apt install -y git nodejs npm python3 build-essential
 # pastikan node >= 22
 node --version
 ```
 
-## 2. Install & Jalankan Letta App Server
+## 2. Install & Jalankan Letta Code
 ```bash
 # install CLI (compile native)
 sudo npm install -g @letta-ai/letta-code
 
-# koneksi LLM provider (mis. OpenAI)
-letta --backend local connect openai --api-key "$OPENAI_API_KEY"
+# jalankan interaktif (SSH) — agen dibuat otomatis
+letta
 
-# buat token auth
-echo "TONY_APP_SERVER_TOKEN_$(openssl rand -hex 16)" > /opt/tony/infra/app-server-token
-
-# jalankan App Server (bind 127.0.0.1 agar tidak terpapar publik)
-letta server \
-  --backend local \
-  --listen ws://127.0.0.1:4500 \
-  --ws-auth capability-token \
-  --ws-token-file /opt/tony/infra/app-server-token
+# di dalam CLI:
+#   /connect    -> hubungkan LLM provider (OpenAI/Anthropic/Ollama, ...)
+#   /model      -> pilih model
+#   /new        -> percakapan baru (verifikasi memori lintas sesi)
 ```
-**Agar selalu hidup**, buat service systemd:
+
+## 3. (Opsional) App Server selalu-hidup — systemd
+Bila ingin agen selalu aktif / diakses berulang via SSH, buat service systemd:
+
 ```ini
 [Unit]
 Description=Letta App Server (Tony)
 After=network.target
 [Service]
-ExecStart=/usr/bin/letta server --backend local --listen ws://127.0.0.1:4500 --ws-auth capability-token --ws-token-file /opt/tony/infra/app-server-token
+ExecStart=/usr/bin/letta server --backend local --listen ws://127.0.0.1:4500
 Restart=always
 User=tony
 [Install]
@@ -53,85 +51,44 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now letta-tony
 ```
 
-## 3. Deploy "Tony UI" (Next.js)
-```bash
-cd /opt/tony/apps/ui
-pnpm install
-pnpm build
-# env produksi
-export LETTA_APP_SERVER_URL=ws://127.0.0.1:4500
-export LETTA_APP_SERVER_TOKEN="$(cat /opt/tony/infra/app-server-token)"
-# jalankan via node/pm2/docker (restart otomatis)
+> ⚠️ Biarkan terikat `127.0.0.1` (internal). App Server **tidak boleh** diekspos publik.
+
+## 4. (Opsional) Containerisasi
+Bila memilih Docker untuk App Server (dasar `node:22-slim`), pastikan native deps diinstal
+sebelum `npm install -g @letta-ai/letta-code`:
+
+```dockerfile
+FROM node:22-slim
+RUN apt-get update && apt-get install -y python3 make g++ git && npm i -g @letta-ai/letta-code
+CMD ["letta", "server", "--backend", "local", "--listen", "ws://127.0.0.1:4500"]
 ```
-Bisa di-container-kan (`infra/docker-compose.yml`) dengan `restart: always`.
-
-## 4. Reverse Proxy — Nginx + HTTPS
-
-### 4.1 Instal Nginx & Certbot
-```bash
-sudo apt install -y nginx certbot python3-certbot-nginx
-```
-
-### 4.2 Konfigurasi Site (`/etc/nginx/sites-available/tony`)
-```nginx
-server {
-    listen 80;
-    server_name tony.example.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;      # Tony UI
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";  # websocket/streaming
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
-    }
-}
-```
-```bash
-sudo ln -s /etc/nginx/sites-available/tony /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-### 4.3 TLS
-```bash
-sudo certbot --nginx -d tony.example.com
-sudo systemctl enable certbot.timer
-```
-Selesai → `https://tony.example.com`.
-
-> ⚠️ JANGAN expose :4500 (App Server) ke publik. Nginx hanya mengekspos Tony UI (dan kelak
-> routing `/activepieces/*`).
+Pakai `restart: always`.
 
 ## 5. Backup & Recovery
-- **State/memori agen:** backup `~/.letta/` (atau `LETTA_LOCAL_BACKEND_DIR`) — MemFS per agen.
-- **Config:** `/opt/tony/infra/*` (token, env).
-- **UI build artifact** bisa di-rebuild dari source.
-- Jadwalkan cron backup harian ke lokasi eksternal.
+- **State/memori agen:** backup `~/.letta` (MemFS per agen) — bisa via `git` karena git-backed.
+- **Config:** API key / konfigurasi provider.
+- Jadwalkan cron backup harian ke lokasi eksternal:
+```bash
+# contoh cron harian
+0 3 * * * rsync -a ~/.letta/ /backup/tony-letta/
+```
 
 ## 6. Monitoring & Logging (Opsional)
-- `sudo journalctl -u letta-tony -f` — log App Server
-- `docker compose logs -f ui` — log UI
-- `docker stats` / `htop` — resource
+- `sudo journalctl -u letta-tony -f` — log App Server (bila pakai systemd)
+- `docker logs -f letta` — log container (bila pakai Docker)
+- `htop` / `docker stats` — resource
 
 ## 7. Update / Upgrade
 ```bash
-cd /opt/tony && git pull
-# rebuild UI
-cd apps/ui && pnpm install && pnpm build
+sudo npm install -g @letta-ai/letta-code@latest
 sudo systemctl restart letta-tony
 ```
 > Pantau changelog Letta untuk breaking change.
 
 ## 8. Checklist Go-Live Fase 1
-- [ ] App Server Letta aktif (systemd) di VPS
-- [ ] LLM provider terkoneksi; chat berfungsi
+- [ ] Letta Code CLI terinstal & berjalan
+- [ ] LLM provider terkoneksi; chat berfungsi via CLI
 - [ ] Memori lintas percakapan terverifikasi
-- [ ] "Tony UI" di-deploy (Next.js) & restart otomatis
-- [ ] Nginx proxy + HTTPS aktif (`https://tony.example.com`)
-- [ ] App Server `:4500` TIDAK terpapar publik
+- [ ] (Opsional) App Server aktif (systemd/Docker) & terikat internal
 - [ ] Backup state & config terjadwal
-- [ ] Branding "Tony" muncul di UI
+- [ ] Tidak ada port service yang diekspos publik (selain SSH)

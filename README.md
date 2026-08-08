@@ -1,47 +1,49 @@
 # Tony
 
-> Asisten AI pribadi **self-hosted** — beringatan, belajar, dan mampu bertindak.
-> Dibangun sebagai **satu monorepo terpadu** di atas fondasi open-source berlisensi permissive.
+> Asisten AI pribadi **self-hosted** — beringatan, belajar, dan (kelak) mampu bertindak.
+> Dibangun di atas **Letta** (Apache 2.0) tanpa komponen tambahan yang tidak diperlukan.
 
 ## ✨ Ringkasan
-Tony adalah asisten AI yang dapat di-deploy sendiri di VPS Anda. Ia dirancang untuk:
-- 🧠 **Beringatan** — memakai **Letta** (agen stateful dengan memori) sehingga ingat konteks & belajar seiring waktu.
-- 💬 **Berbicara dengan identitas "Tony"** — lewat **"Tony UI"**, frontend web yang kita bangun.
-- ⚙️ **(Fase 2) Bertindak** — lewat **Activepieces** untuk otomasi nyata (email, CRM, notifikasi, dsb).
+Tony adalah asisten AI yang berjalan di infrastruktur Anda sendiri. Fase ini **murni memakai
+Letta Code** — tanpa frontend custom, tanpa Agent SDK, tanpa komponen tambahan:
+
+- 🧠 **Beringatan & belajar** — memakai **Letta Code** (agen stateful dengan memori) sehingga
+  ingat konteks & belajar seiring waktu.
+- 💬 **Berbicara via CLI** — chat langsung dari terminal (`letta`), cukup satu perintah.
+- ⚙️ **(Fase 2) Bertindak** — integrasi otomasi nyata masih **dievaluasi**
+  (lihat [`docs/10-eval-activepieces.md`](docs/10-eval-activepieces.md)).
+
+> Keputusan: **tidak ada tambahan apa pun di Fase 1** (UI custom, frontend web, dsb. ditunda;
+> kebutuhan interface akan diputuskan belakangan).
 
 ## 🧩 Komponen & Lisensi
 | Komponen | Peran | Lisensi |
 |----------|-------|---------|
-| [Letta](https://github.com/letta-ai/letta) (Apache 2.0) | Otak: agen stateful + memori | ✅ Permissive |
-| **Tony UI** | Frontend web (React/Next.js) — milik kita | Milik kita (disarankan MIT) |
-| [Activepieces](https://github.com/activepieces/activepieces) (MIT) | Mesin otomasi/aksi (Fase 2) | ✅ Permissive |
+| [Letta Code](https://github.com/letta-ai/letta-code) | Otak + interface: agen stateful dengan memori, dijalankan via CLI | ✅ Apache 2.0 (permissive) |
+| [Activepieces](https://github.com/activepieces/activepieces) | Mesin otomasi/aksi (Fase 2) | ⏳ **Masih dievaluasi** (MIT CE) |
 
-> Semua komponen berlisensi permissive → Tony bebas untuk **open-source, portofolio, dan dijadikan
-> basis layanan berbayar** oleh siapa pun.
+> Source Letta Code disalin ke `letta-code/` agar semua kebutuhan project tersimpan dalam satu repo.
 
 ## 📁 Struktur
 ```
 tony/
-├── apps/
-│   ├── ui/            # "Tony UI" (Next.js + TypeScript)     [Fase 1]
-│   └── letta/         # service App Server Letta              [Fase 1]
-├── packages/shared/   # tipe & util bersama (opsional)
-├── infra/             # docker-compose, nginx, .env.example
+├── letta-code/        # source Letta Code (vendor, untuk referensi/dev)
 ├── docs/              # dokumentasi project
 └── README.md
 ```
 
 ## 🚀 Coba Lokal (Fase 1)
 ```bash
-# 1) Letta CLI + App Server (butuh Node 22.19+, python/make/g++)
+# 1) Install Letta Code CLI (butuh Node 22.19+; python/make/g++ saat compile native)
 npm install -g @letta-ai/letta-code
-letta --backend local connect openai --api-key "<KEY>"
-letta server --backend local --listen ws://127.0.0.1:4500
 
-# 2) Tony UI (monorepo)
-corepack enable
-pnpm install
-cd apps/ui && pnpm dev        # http://localhost:3000
+# 2) Jalankan CLI → agen "Tony" dibuat otomatis
+letta
+
+# 3) Di dalam CLI:
+#    /connect          # hubungkan LLM provider (OpenAI, Anthropic, Ollama, ...)
+#    /model            # pilih model
+#    /new              # sesi baru — verifikasi memori lintas sesi
 ```
 Detail: lihat [`docs/05-dev-guide.md`](docs/05-dev-guide.md).
 
@@ -57,11 +59,13 @@ Detail: lihat [`docs/05-dev-guide.md`](docs/05-dev-guide.md).
 | [07-context.md](docs/07-context.md) | Asumsi, risiko, referensi |
 | [08-plan.md](docs/08-plan.md) | Milestone & task |
 | [09-adr.md](docs/09-adr.md) | Architecture Decision Records |
+| [10-eval-activepieces.md](docs/10-eval-activepieces.md) | Evaluasi "tangan" Fase 2 |
 
 ## 🗺️ Roadmap
-- **Fase 1:** Self-host Letta + bangun "Tony UI" + branding + memori. *(sedang dikerjakan)*
-- **Fase 2:** Serap Activepieces (MIT) → integrasi MCP → Tony mampu bertindak.
+- **Fase 1:** Letta Code murni — self-host, memori, interface CLI. *(sedang dikerjakan)*
+- **Fase 2:** Integrasi otomasi/aksi (Activepieces atau alternatif — **menunggu evaluasi**).
 
 ## 📄 Lisensi
-Tony menggabungkan komponen **Apache 2.0** (Letta) dan **MIT** (Activepieces). Kode "Tony UI"
-milik project ini. Saat mendistribusikan, sertakan atribusi & lisensi komponen terkait.
+Letta berlisensi **Apache 2.0** (permissive): bebas dipakai, dimodifikasi, didistribusikan, dan
+dijadikan basis turunan berbayar dengan atribusi. Saat mendistribusikan, sertakan lisensi/NOTICE
+komponen terkait.

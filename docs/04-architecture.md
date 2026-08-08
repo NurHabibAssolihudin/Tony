@@ -1,75 +1,62 @@
 # Arsitektur — Project Tony
 
 ## 1. Prinsip Arsitektur
-1. **Monorepo terpadu** — seluruh project dalam satu repository (UI + service + kelak Activepieces).
-2. **Pemisahan peran:** Otak (Letta) / Wajah (Tony UI) / Tangan (Activepieces).
-3. **Fondasi bebas lisensi** — Letta (Apache 2.0) + Activepieces (MIT).
-4. **Evolusi bertahap** — Fase 1 (Letta + UI), Fase 2 (tambah Activepieces tanpa rombak).
+1. **Monorepo terpadu** — seluruh project dalam satu repository (source Letta + docs).
+2. **Tanpa tambahan yang tidak perlu** — Fase 1 memakai Letta Code murni (CLI).
+3. **Fondasi bebas lisensi** — Letta (Apache 2.0).
+4. **Evolusi bertahap** — Fase 1 (Letta CLI), Fase 2 (tambah komponen otomasi **jika** terpilih).
 5. **Self-hosted & aman** — App Server tidak diekspos publik langsung.
 
-## 2. Arsitektur Fase 1 (Letta + Tony UI)
+## 2. Arsitektur Fase 1 (Letta Code murni)
 ```
-        Browser ──HTTPS──► Nginx (:443)
-                              │
-              ┌───────────────┴───────────────┐
-              ▼  /                            ▼  (internal only)
-        "Tony UI" (Next.js :3000)      Letta App Server (WS :4500)
-              │  keep token                  │  memori/state
-              └────── Letta Agent SDK ───────┤  ~/.letta/... (MemFS)
-                                             ▼
-                                        LLM provider (API)
+        User ──terminal/SSH──►  Letta Code CLI (lokal / VPS)
+                                    │  agen stateful
+                                    │  memori/state ~/.letta (MemFS, git-backed)
+                                    ▼
+                               LLM provider (API)
+
+        (opsional: selalu-hidup / akses jarak jauh)
+        User ──SSH──►  Letta App Server (letta server, bind internal 127.0.0.1:4500)
 ```
-- **Tony UI** memegang token; memanggil App Server via Agent SDK (remote backend).
-- **App Server** menyimpan state/memori agen (MemFS) dan mengeksekusi tool -> LLM.
-- Nginx hanya mengekspos **Tony UI** ke publik; App Server terikat internal (`127.0.0.1`).
+- **CLI** menjalankan agen in-process; semua state (memori, percakapan, koneksi provider) ada di
+  mesin lokal — **tidak perlu akun Letta**.
+- **MemFS** melacak seluruh konteks via git → mudah di-backup, dipindah, atau disinkronkan ke repo.
+- App Server opsional hanya untuk kebutuhan *always-on* / remote; tetap terikat internal.
 
 ## 3. Struktur Monorepo (Fase 1)
 ```
 tony/
-├── apps/
-│   ├── ui/                  # "Tony UI" (Next.js + TS)
-│   │   ├── app/             # halaman & routing
-│   │   ├── components/      # komponen chat & branding
-│   │   └── lib/letta.ts     # wrapper Agent SDK
-│   └── letta/               # service App Server (script/entry, systemd/docker)
-├── infra/
-│   ├── docker-compose.yml   # orchestration
-│   ├── nginx/tony.conf      # reverse proxy + TLS
-│   └── .env.example         # template env
-├── packages/
-│   └── shared/              # tipe & util bersama (opsional)
-├── docs/
-├── README.md
-└── pnpm-workspace.yaml
+├── letta-code/                  # source Letta Code (vendor)
+├── docs/                        # dokumentasi project
+└── README.md
 ```
 
 ## 4. Alur Data Singkat (Fase 1)
-1. User membuka `https://<domain>` → Nginx → **Tony UI**.
-2. User mengirim pesan → Tony UI memanggil **Letta Agent SDK** (remote) → **App Server**.
-3. App Server menyusun konteks dari **memori** agen, memanggil LLM, mengembalikan jawaban (streaming).
-4. Pesan & konteks disimpan di memori agen (MemFS) → Tony "mengingat" lintas sesi.
+1. User menjalankan `letta` di terminal (lokal / SSH ke VPS).
+2. User mengirim pesan → Letta Code menyusun konteks dari **memori** agen, memanggil LLM,
+   mengembalikan jawaban (streaming).
+3. Pesan & konteks disimpan di memori agen (MemFS) → Tony "mengingat" lintas sesi.
 
-## 5. Peta Integrasi Fase 2 (Activepieces via MCP)
+## 5. Peta Integrasi Fase 2 (Otomasi — belum diputuskan)
 ```
-                    "Tony UI"
-                        │  Agent SDK
+                    Letta Code (CLI / App Server)
+                        │  MCP tools (potensial)
                         ▼
-                  Letta App Server ◄── MCP tools ──► Activepieces MCP server
-                                                          │
-                                                     flows / integrasi
+              komponen otomasi (kandidat: Activepieces MCP server)
+                        │
+                   flows / integrasi
 ```
-- Letta agent memuat **MCP client** yang menunjuk ke **Activepieces MCP server** (`/mcp`).
-- Tony memakai tool MCP untuk membuat/menjalankan flow, mengelola tabel, mengetes otomasi.
-- Activepieces ditambahkan sebagai workspace di monorepo (`apps/activepieces`).
-- Routing Nginx: `https://<domain>/` → Tony UI; `https://<domain>/activepieces/*` → Activepieces.
+- Keputusan komponen "tangan" **belum diambil**; lihat `10-eval-activepieces.md`.
+- Prinsip jembatan (bila Activepieces): Letta agent memakai **MCP client** → **Activepieces MCP
+  server** (`/mcp`).
 
 ## 6. Keputusan Arsitektur Penting (ringkas ADR)
 | Keputusan | Alasan | Status |
 |-----------|--------|--------|
-| Letta sebagai otak (bukan LobeHub) | Lisensi Apache 2.0 + memori/learning | ⚖️ ADR-001/002 |
-| Bangun "Tony UI" custom | Web app Letta tidak self-hostable; butuh branding | ⚖️ ADR-003 |
-| Jembatan via MCP ke Activepieces | Standar terbuka, didukung keduanya | 📋 ADR-005 |
-| App Server tidak diekspos publik | Keamanan (harus via backend/UI) | ⚖️ ADR-007 |
+| Letta sebagai otak (bukan LobeHub) | Lisensi Apache 2.0 + memori/learning | ⚖️ ADR-001 |
+| **Tanpa UI custom** — pakai Letta CLI | Kebutuhan UI kecil; interface first-party tersedia | ⚖️ ADR-010 (ADR-003 superseded) |
+| App Server tidak diekspos publik | Keamanan | ⚖️ ADR-007 |
 | Monorepo terpadu | Satu toolchain & deploy | ⚖️ ADR-006 |
+| Otomasi = evaluasi dulu | Hindari komitmen sebelum keputusan matang | 📋 ADR-002/005 (evaluasi) |
 
 > Detail ADR lengkap: `09-adr.md`.
