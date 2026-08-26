@@ -95,6 +95,7 @@ Major development plan:
 | [08-plan.md](docs/08-plan.md) | Milestones & tasks |
 | [09-adr.md](docs/09-adr.md) | Architecture Decision Records |
 | [10-eval-activepieces.md](docs/10-eval-activepieces.md) | Phase 2 "hands" evaluation |
+| [11-web-ui-design.md](docs/11-web-ui-design.md) | Web UI design draft (Face, self-config, open multi-user question) |
 
 Native application documentation (`docs/app/`):
 

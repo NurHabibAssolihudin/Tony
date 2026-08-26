@@ -17,6 +17,7 @@ references. Full decisions live in `09-adr.md`.
 | ADR-008 | ~~"Tony UI" shape~~ | Interface = first-party CLI | ❌ Superseded (ADR-010) |
 | ADR-009 | Agent memory via MemFS + backup | Tony's memory is a core asset | ⚖️ Accepted |
 | ADR-010 | **Phase 1 interface = pure Letta CLI; no extra components** | Small UI need; ready-made CLI | ⚖️ Accepted |
+| ADR-012 | **Web UI ("Face") planned** — supersedes ADR-010 at implementation | Full config surface + conversational self-config | 📋 Proposed (open: multi-user mechanism, stack) |
 
 ## 2. License Status (Analysis)
 

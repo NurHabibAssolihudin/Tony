@@ -45,6 +45,14 @@ integration.
 
 > Principle: **do not start integration before the component decision is final.**
 
+### Web UI ("the Face") — design ready
+
+The web-based control panel (chat + full configuration + conversational
+self-configuration, Telegram pilot) is designed in `11-web-ui-design.md`.
+Multi-user mechanism is recorded there as an open decision. Delivery stages
+P2-A…P2-D are outlined in that document; implementation supersedes ADR-010
+(tracked as ADR-012 Proposed).
+
 ## 4. Prioritization Principles
 
 1. **Stabilize Phase 1 first** before Phase 2.

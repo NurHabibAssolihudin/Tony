@@ -134,6 +134,36 @@
   - Cons: `docs/app/` must be synced manually against upstream releases (see
     `05-dev-guide.md` § Vendored engine).
 
+## ADR-012 — Tony Web UI ("the Face") is planned; supersedes ADR-010 at implementation
+
+- **Status:** Proposed
+- **Date:** 2026-08
+- **Context:** Phase 1 correctly shipped with the CLI as the only interface
+  (ADR-010). The product direction now calls for a web-based control panel where
+  all configuration happens (providers, MCP, agents, skills, channels,
+  schedules, memory) plus **conversational self-configuration** — the user asks
+  Tony in natural language to wire an integration (e.g., "connect Telegram") and
+  the agent performs it, requesting only required credentials.
+- **Proposal:** Build a Tony-owned web UI as a client of the existing App Server
+  management protocol (`connect-providers`, `settings`, `skills-agents`,
+  `secrets`, `cron`, `agents-conversations`, `model-catalog`, …) — the same
+  surface the official desktop app uses. Configuration actions requested via
+  chat are executed by a Tony-owned admin mod (tools such as
+  `channel.configure/test`, `provider.set`, `mcp.add`, `secret.set`) so the
+  vendored engine stays pristine. Secrets enter through a secure-input widget
+  and are stored in the secrets store, never in transcripts or memory files.
+- **Decided within this direction:** Telegram as the pilot channel; internal-only
+  exposure first (LAN/Tailscale); small user scale (~2–5).
+- **Open items:** web framework choice; **multi-user mechanism** (personal
+  agent per user vs one shared assistant vs hybrid with shared-memory team
+  brain) — engine evidence recorded in `11-web-ui-design.md` § 8.
+- **Consequences:**
+  - Pros: full control surface without touching engine internals; aligns with
+    the multi-device self-hosted server direction; reuses a mature protocol.
+  - Cons: new application to build/maintain; revises ADR-010's "no custom UI"
+    stance for this phase (CLI remains fully supported).
+- **Design document:** `11-web-ui-design.md`.
+
 ---
 
 ## Appendix: Decision Flow
