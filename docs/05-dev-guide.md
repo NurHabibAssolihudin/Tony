@@ -63,9 +63,17 @@ letta server --backend local --listen ws://127.0.0.1:4500
 ## 3. Struktur Repo
 ```
 tony/
-├── letta-code/        # source Letta Code (vendor, untuk referensi/riset)
+├── letta-code/        # source Letta Code (vendor, untuk referensi/riset) — ter-pin v0.30.32
 ├── docs/              # dokumentasi project
 └── README.md
+```
+Vendor dilakukan sebagai plain copy (tanpa `.git`) dari **tag rilis upstream**, saat ini
+**v0.30.32** (commit `1e78870`). Untuk memperbarui vendor:
+```powershell
+Remove-Item -Recurse -Force letta-code
+git clone --depth 1 --branch vX.Y.Z https://github.com/letta-ai/letta-code letta-code
+Remove-Item -Recurse -Force letta-code\.git
+# lalu update catatan versi ter-pin di README.md & dokumen ini
 ```
 
 ## 4. Interface Lain (di luar scope Fase 1)

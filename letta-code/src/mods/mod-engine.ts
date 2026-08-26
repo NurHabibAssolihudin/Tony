@@ -32,6 +32,8 @@ import {
   recordDeprecatedContextApiSourceDiagnostics,
 } from "@/mods/deprecated-api";
 import { isTypeScriptModFileExtension } from "@/mods/file-extensions";
+import * as modInvocationContext from "@/mods/invocation-context";
+import { createModChangeBatcher } from "@/mods/mod-change-batcher";
 import {
   appendModDiagnostic,
   recordModDiagnostic,
@@ -63,6 +65,11 @@ import {
   unregisterModToolsForOwner,
 } from "@/mods/tool-registry";
 import { normalizeTurnStartCancelReason } from "@/mods/turn-start-cancel";
+import {
+  cloneTurnStartInput,
+  isTurnStartInput,
+  preserveApprovalFirstOrdering,
+} from "@/mods/turn-start-input";
 import type {
   ModCapabilities,
   ModCommand,
@@ -94,6 +101,7 @@ import type {
   ModTurnStartCancelResult,
   ModTurnStartEvent,
 } from "@/mods/types";
+import { createNoopModPanelHandle } from "@/mods/ui-helpers";
 
 export type {
   LocalModSource,
@@ -220,7 +228,7 @@ export interface LoadLocalModsOptions extends ResolveLocalModSourcesOptions {
   generation?: number;
   onChange?: () => void;
   onDiagnostic?: (diagnostic: ModDiagnostic) => void;
-  onNotification?: (message: string) => void;
+  onNotification?: modInvocationContext.ModNotificationHandler;
   onRegistryCreated?: (registry: LocalModRegistry) => void;
   registerCapabilitiesGlobally?: boolean;
   reservedToolNames?: Iterable<string>;
@@ -626,19 +634,6 @@ function isTurnStartResultWithCancel(
   );
 }
 
-function isTurnStartInput(value: unknown): value is ModTurnStartEvent["input"] {
-  return (
-    Array.isArray(value) &&
-    value.every((item) => typeof item === "object" && item !== null)
-  );
-}
-
-function cloneTurnStartInput(
-  input: ModTurnStartEvent["input"],
-): ModTurnStartEvent["input"] {
-  return input.map((item) => structuredClone(item));
-}
-
 function isToolStartResultWithArgs(
   name: ModEventName,
   result: unknown,
@@ -882,13 +877,6 @@ function upsertModPanel(
   };
 }
 
-function createNoopModPanelHandle(): ModPanelHandle {
-  return {
-    close() {},
-    update() {},
-  };
-}
-
 function createLettaModApi(
   registry: LocalModRegistry,
   owner: ModOwner,
@@ -896,7 +884,7 @@ function createLettaModApi(
   getClient: () => Promise<Letta>,
   onChange: () => void,
   onDiagnostic: ((diagnostic: ModDiagnostic) => void) | undefined,
-  onNotification: ((message: string) => void) | undefined,
+  onNotification: modInvocationContext.ModNotificationHandler | undefined,
   builtinCommandIds: Set<string>,
   reservedToolNames: Set<string>,
   signal: AbortSignal,
@@ -1274,9 +1262,9 @@ function createLettaModApi(
     ui: {
       closePanel,
       notify(message) {
-        if (!capabilities.ui.panels || !message.trim()) return;
+        if (!onNotification || !message.trim()) return;
         if (!guardLive({ id: "notify", kind: "panel" })) return;
-        onNotification?.(message.trim());
+        modInvocationContext.notifyMod(onNotification, message);
       },
       openPanel(panel) {
         if (!capabilities.ui.panels) {
@@ -1466,31 +1454,30 @@ export async function loadLocalMods(
         )) as LocalModModule;
         const factory = getModFactory(module);
         failurePhase = "activate";
-
         if (typeof factory !== "function") {
           throw new Error(
             "Mod must export a default function or activate() function",
           );
         }
-
-        const dispose = await (factory as LettaModFactory)(
-          createLettaModApi(
-            registry,
-            owner,
-            capabilities,
-            getConfiguredClient,
-            onChange,
-            options.onDiagnostic,
-            options.onNotification,
-            builtinCommandIds,
-            reservedToolNames,
-            abortController.signal,
-          ),
+        const changes = createModChangeBatcher(onChange);
+        const api = createLettaModApi(
+          registry,
+          owner,
+          capabilities,
+          getConfiguredClient,
+          changes.notify,
+          options.onDiagnostic,
+          options.onNotification,
+          builtinCommandIds,
+          reservedToolNames,
+          abortController.signal,
         );
+        const activate = factory as LettaModFactory;
+        const dispose = await changes.run(() => activate(api));
         if (typeof dispose === "function") {
           registry.disposers.push({
             abortController,
-            dispose,
+            dispose: () => changes.runSync(dispose),
             owner,
           });
         }
@@ -1532,7 +1519,9 @@ export async function emitLocalModEvent<TName extends ModEventName>(
   const diagnostics: ModDiagnostic[] = [];
   const results: Array<NonNullable<ModEventResultMap[TName]>> = [];
   let turnStartCancel: ModTurnStartCancelResult | undefined;
-
+  const turnStartHadApproval =
+    name === "turn_start" &&
+    (event as ModTurnStartEvent).input.some((item) => item.type === "approval");
   for (const registration of registrations) {
     const signal = registration.owner
       ? registry.ownerAbortControllers[registration.owner.id]?.signal
@@ -1588,7 +1577,11 @@ export async function emitLocalModEvent<TName extends ModEventName>(
         recordEventDiagnostic,
         "ctx.getContext",
       );
-      const result = await registration.handler(event, eventContext);
+      const result = await modInvocationContext.invoke(
+        eventContext,
+        registration,
+        event,
+      );
       if (isTurnStartResultWithInput(name, result)) {
         (event as ModTurnStartEvent).input = result.input;
       }
@@ -1668,6 +1661,10 @@ export async function emitLocalModEvent<TName extends ModEventName>(
     const turnStartEventWithCancel = event as ModTurnStartEvent & {
       cancel?: ModTurnStartCancelResult;
     };
+    turnStartEventWithCancel.input = preserveApprovalFirstOrdering(
+      turnStartHadApproval,
+      turnStartEventWithCancel.input,
+    );
     if (turnStartCancel) {
       turnStartEventWithCancel.cancel = { ...turnStartCancel };
     } else {

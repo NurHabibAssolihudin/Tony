@@ -8,6 +8,7 @@ import {
 } from "@/reminders/engine";
 import {
   createSharedReminderState,
+  markPostCompactionContextRemindersPending,
   markSecretsInfoReminderPending,
 } from "@/reminders/state";
 import {
@@ -118,10 +119,14 @@ describe("secrets info reminders", () => {
     expect(text).toContain("The agent secrets were updated");
     expect(text).toContain("$PLAYGROUND_AGENT_ID");
     expect(text).toContain(
-      "The Letta Code harness secret manager injects only secrets referenced as `$NAME` in a shell command",
+      "the harness replaces a referenced `$NAME` with its real value",
     );
+    expect(text).toContain("Secrets are not exported automatically");
     expect(text).toContain('os.environ["API_KEY"]');
     expect(text).toContain("process.env.API_KEY");
+    expect(text).toContain(
+      "Tool output shows `NAME=<REDACTED>`, which means the secret is set and working",
+    );
     if (process.platform === "win32") {
       expect(text).toContain("$env:API_KEY = $API_KEY; python script.py");
       expect(text).toContain("$env:API_KEY = $API_KEY; bun run script.ts");
@@ -150,5 +155,29 @@ describe("secrets info reminders", () => {
     expect(text).toContain("$PLAYGROUND_AGENT_ID");
     expect(state.hasSentSecretsInfo).toBe(true);
     expect(state.pendingSecretsInfoRefresh).toBe(false);
+  });
+
+  test("re-emits existing secret names after compaction", async () => {
+    await initSecretsFromServer(SECRETS_AGENT_ID, {
+      secrets: [{ key: "PLAYGROUND_AGENT_ID", value: "agent-123" }],
+    });
+    const state = createSharedReminderState();
+    state.hasSentAgentInfo = true;
+    state.hasSentSessionContext = true;
+    state.hasSentSecretsInfo = true;
+    state.lastSentSecretNamesKey = "PLAYGROUND_AGENT_ID";
+    state.lastNotifiedPermissionMode = permissionMode.getMode();
+
+    markPostCompactionContextRemindersPending(state);
+
+    const result = await buildSecretsTestReminderParts(state);
+
+    const text = result.parts.map((part) => part.text).join("\n");
+    expect(result.appliedReminderIds).toContain("secrets-info");
+    expect(text).toContain(
+      "The following secrets are set on your agent and available for use",
+    );
+    expect(text).not.toContain("The agent secrets were updated");
+    expect(text).toContain("$PLAYGROUND_AGENT_ID");
   });
 });

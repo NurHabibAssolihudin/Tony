@@ -1,4 +1,6 @@
-import { homedir } from "node:os";
+import { mkdtempSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Message } from "@letta-ai/letta-client/resources/agents/messages";
 import type { getClient } from "./api/client";
 import type {
@@ -42,6 +44,9 @@ export type RunMessageStreamParams = Parameters<
 >;
 export type RunMessageStreamBody = RunMessageStreamParams[1];
 export type RunMessageStreamOptions = RunMessageStreamParams[2];
+
+export type RunRetrieveParams = Parameters<APIClient["runs"]["retrieve"]>;
+export type RunRetrieveOptions = RunRetrieveParams[1];
 
 export type AgentRetrieveParams = Parameters<APIClient["agents"]["retrieve"]>;
 export type AgentRetrieveOptions = AgentRetrieveParams[1];
@@ -279,6 +284,7 @@ export interface Backend {
 
   retrieveRun(
     runId: string,
+    options?: RunRetrieveOptions,
   ): Promise<Awaited<ReturnType<APIClient["runs"]["retrieve"]>>>;
 
   streamRunMessages(
@@ -499,9 +505,9 @@ export class APIBackend implements Backend {
     return client.agents.messages.cancel(agentId, { run_ids: [runId] });
   }
 
-  async retrieveRun(runId: string) {
+  async retrieveRun(runId: string, options?: RunRetrieveOptions) {
     const client = await this.getClient();
-    return client.runs.retrieve(runId);
+    return client.runs.retrieve(runId, options);
   }
 
   async streamRunMessages(
@@ -529,13 +535,16 @@ export function getLocalBackendStorageDir(homeDir = homedir()): string {
   return getLocalBackendStorageDirFromPaths(homeDir);
 }
 
+function localBackendExecutionMode(): "deterministic" | "pi" {
+  return process.env.LETTA_LOCAL_BACKEND_EXECUTOR === "deterministic"
+    ? "deterministic"
+    : "pi";
+}
+
 function createExperimentalLocalBackend(): Backend {
   return new LocalBackend({
     storageDir: getLocalBackendStorageDir(),
-    executionMode:
-      process.env.LETTA_LOCAL_BACKEND_EXECUTOR === "deterministic"
-        ? "deterministic"
-        : "pi",
+    executionMode: localBackendExecutionMode(),
   });
 }
 
@@ -566,6 +575,25 @@ export function configureBackendMode(mode: BackendMode): void {
   setConfiguredBackendMode(mode);
   process.env[LOCAL_BACKEND_EXPERIMENTAL_ENV] = mode === "local" ? "1" : "0";
   backend = createBackendForMode(mode);
+}
+
+export function configureEphemeralLocalBackend(): void {
+  if (resolveBackendMode() !== "local") {
+    throw new Error("Ephemeral local backend requires local backend mode");
+  }
+
+  const stateStorageDir = mkdtempSync(
+    join(tmpdir(), "letta-code-ephemeral-local-"),
+  );
+  backend = new LocalBackend({
+    storageDir: getLocalBackendStorageDir(),
+    stateStorageDir,
+    memfsEnabled: false,
+    executionMode: localBackendExecutionMode(),
+  });
+  process.once("exit", () => {
+    rmSync(stateStorageDir, { recursive: true, force: true });
+  });
 }
 
 export function isLocalBackendEnabled(): boolean {

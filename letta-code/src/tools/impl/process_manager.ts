@@ -3,10 +3,12 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { scrubSecretsFromString } from "@/tools/secret-substitution";
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -33,6 +35,17 @@ export interface BackgroundProcess {
   totalStderrLines?: number;
   cleanupTimer?: TimerHandle;
   runtimeScope?: BackgroundRuntimeScope;
+  kind?: "monitor";
+  description?: string;
+  monitorSource?: "command" | "websocket";
+  persistent?: boolean;
+  secrets?: Readonly<Record<string, string>>;
+  /**
+   * Set when the agent deliberately stops the shell (KillBash/TaskStop) so the
+   * resulting "exit" event does not wake it with a failure notification for a
+   * process it just killed on purpose.
+   */
+  completionNotificationSuppressed?: boolean;
 }
 
 export interface BackgroundTask {
@@ -52,10 +65,36 @@ export interface BackgroundTask {
 
 export const backgroundProcesses = new Map<string, BackgroundProcess>();
 export const backgroundTasks = new Map<string, BackgroundTask>();
+
+type BackgroundProcessStateListener = (scope?: BackgroundRuntimeScope) => void;
+
+const backgroundProcessStateListeners =
+  new Set<BackgroundProcessStateListener>();
+
+export function subscribeToBackgroundProcessState(
+  listener: BackgroundProcessStateListener,
+): () => void {
+  backgroundProcessStateListeners.add(listener);
+  return () => backgroundProcessStateListeners.delete(listener);
+}
+
+export function notifyBackgroundProcessStateChanged(
+  scope?: BackgroundRuntimeScope,
+): void {
+  for (const listener of backgroundProcessStateListeners) {
+    listener(scope);
+  }
+}
+
 let backgroundOutputDir: string | undefined;
 let bashIdCounter = 1;
 export function getNextBashId() {
   return `bash_${bashIdCounter++}`;
+}
+
+let monitorIdCounter = 1;
+export function getNextMonitorId() {
+  return `monitor_${monitorIdCounter++}`;
 }
 
 let execSessionIdCounter = 1;
@@ -326,7 +365,35 @@ export function createBackgroundOutputFile(id: string): string {
 
 /**
  * Append content to a background output file.
+ *
+ * Returns `true` on success, `false` on failure such as ENOSPC. The function
+ * never throws so that callers inside event callbacks (stdout/stderr data
+ * handlers) do not propagate the exception and crash the host process.
+ * Callers should check the return value and degrade the affected session or
+ * background process instead of pretending the write succeeded.
  */
-export function appendToOutputFile(filePath: string, content: string): void {
-  appendFileSync(filePath, content);
+export function appendToOutputFile(filePath: string, content: string): boolean {
+  try {
+    appendFileSync(filePath, content);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function scrubCompletedBackgroundOutput(
+  processState: BackgroundProcess,
+): boolean {
+  if (!processState.outputFile || !processState.secrets) return true;
+  try {
+    const content = readFileSync(processState.outputFile, "utf8");
+    writeFileSync(
+      processState.outputFile,
+      scrubSecretsFromString(content, processState.secrets),
+      { mode: 0o600 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }

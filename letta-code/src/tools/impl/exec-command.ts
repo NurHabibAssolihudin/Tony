@@ -1,5 +1,5 @@
-import { type ChildProcess, spawn } from "node:child_process";
 import { getCurrentWorkingDirectory } from "@/runtime-context";
+import { scrubSecretsFromString } from "@/tools/secret-substitution";
 import { noteExpectedWorktreeForLauncher } from "@/websocket/listener/worktree-ownership";
 import {
   appendBackgroundProcessOutput,
@@ -9,6 +9,7 @@ import {
   createBackgroundOutputFile,
   getNextExecSessionId,
   scheduleBackgroundProcessCleanup,
+  scrubCompletedBackgroundOutput,
 } from "./process_manager.js";
 import { resolveShellWorkdir } from "./shell.js";
 import { getShellEnv } from "./shell-env.js";
@@ -17,6 +18,12 @@ import {
   buildShellLaunchers,
   selectAvailableShellLauncher,
 } from "./shell-launchers.js";
+import {
+  type RunningShellProcess,
+  ShellExecutionError,
+  type ShellProcessHandle,
+  startShellProcess,
+} from "./shell-runner.js";
 import { applyShellSandbox } from "./shell-sandbox.js";
 import { LIMITS, truncateByChars } from "./truncation.js";
 import { validateRequiredParams } from "./validation.js";
@@ -31,6 +38,7 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 10_000;
 const MAX_INLINE_OUTPUT_CHARS = LIMITS.BASH_OUTPUT_CHARS;
 const MAX_SESSION_OUTPUT_CHARS = 1_000_000;
 const EXEC_SESSION_CLEANUP_MS = 5 * 60 * 1000;
+const INTERRUPT = "\u0003";
 
 interface ExecCommandArgs {
   cmd: string;
@@ -76,55 +84,10 @@ interface ExecSession {
   status: ExecSessionStatus;
   exitCode: number | null;
   tty: boolean;
+  secrets: Readonly<Record<string, string>>;
+  outputWriteFailed?: boolean;
   cleanupTimer?: ReturnType<typeof setTimeout>;
 }
-
-type ProcessLauncher = {
-  kill(signal?: string | number): unknown;
-  write(input: string): void;
-};
-
-type NodePtyExitEvent = { exitCode?: number; signal?: number };
-
-type NodePtyProcess = {
-  pid: number;
-  write: (data: string) => void;
-  kill: (signal?: string) => void;
-  onData: (listener: (data: string) => void) => void;
-  onExit: (listener: (event: NodePtyExitEvent) => void) => void;
-};
-
-type NodePtyModule = {
-  spawn: (
-    file: string,
-    args: string[],
-    options: {
-      name: string;
-      cols: number;
-      rows: number;
-      cwd: string;
-      env: Record<string, string>;
-    },
-  ) => NodePtyProcess;
-};
-
-const NODE_PTY_BRIDGE_SCRIPT = `
-const pty = require("node-pty");
-const config = JSON.parse(process.argv[1]);
-const child = pty.spawn(config.executable, config.args, {
-  name: "xterm-256color",
-  cols: 80,
-  rows: 24,
-  cwd: config.cwd,
-  env: process.env,
-});
-child.onData((data) => process.stdout.write(data));
-child.onExit(({ exitCode }) => process.exit(typeof exitCode === "number" ? exitCode : 1));
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (data) => child.write(data));
-process.on("SIGTERM", () => child.kill("SIGTERM"));
-process.on("SIGINT", () => child.kill("SIGINT"));
-`;
 
 type ExecOutputChunk = {
   text: string;
@@ -200,14 +163,19 @@ function maxCharsForTokens(maxOutputTokens?: number): number {
   return Math.min(Math.max(1, maxTokens * 4), MAX_INLINE_OUTPUT_CHARS);
 }
 
-function truncateOutput(text: string, maxOutputTokens?: number): string {
+function truncateOutput(
+  text: string,
+  maxOutputTokens: number | undefined,
+  secrets: Readonly<Record<string, string>>,
+): string {
   return truncateByChars(
-    text,
+    scrubSecretsFromString(text, secrets),
     maxCharsForTokens(maxOutputTokens),
     "exec_command",
     {
       workingDirectory: getCurrentWorkingDirectory(),
       toolName: "exec_command",
+      secrets,
     },
   ).content;
 }
@@ -311,6 +279,7 @@ function formatExecOutput(params: {
   output: string;
   originalTokenCount: number;
   maxOutputTokens?: number;
+  secrets: Readonly<Record<string, string>>;
 }): string {
   const sections = [
     `Chunk ID: ${params.chunkId}`,
@@ -326,7 +295,9 @@ function formatExecOutput(params: {
 
   sections.push(`Original token count: ${params.originalTokenCount}`);
   sections.push("Output:");
-  sections.push(truncateOutput(params.output, params.maxOutputTokens));
+  sections.push(
+    truncateOutput(params.output, params.maxOutputTokens, params.secrets),
+  );
   return sections.join("\n");
 }
 
@@ -396,29 +367,36 @@ function buildExecLaunchers(args: ExecCommandArgs): string[][] {
   });
 }
 
-function buildPtyEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  const ptyEnv: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) {
-      ptyEnv[key] = value;
-    }
-  }
-  ptyEnv.TERM = ptyEnv.TERM || "xterm-256color";
-  ptyEnv.COLORTERM = ptyEnv.COLORTERM || "truecolor";
-  return ptyEnv;
-}
-
 function createSessionOutputAppender(params: {
   session: ExecSession;
   outputFile: string;
+  secrets: Readonly<Record<string, string>>;
 }): (text: string, stream: "stdout" | "stderr") => void {
   return (text: string, stream: "stdout" | "stderr") => {
-    appendSessionOutput(params.session, text, stream);
+    const sanitizedText = scrubSecretsFromString(text, params.secrets);
+    appendSessionOutput(params.session, sanitizedText, stream);
     const bgProcess = backgroundProcesses.get(params.session.id);
     if (bgProcess) {
-      appendBackgroundProcessOutput(bgProcess, stream, text);
+      appendBackgroundProcessOutput(bgProcess, stream, sanitizedText);
     }
-    appendToOutputFile(params.outputFile, text);
+    const wrote = appendToOutputFile(params.outputFile, sanitizedText);
+    if (!wrote && params.session.status === "running") {
+      params.session.outputWriteFailed = true;
+      appendSessionOutput(
+        params.session,
+        "\n[output file write failed; output may be incomplete]\n",
+        "stderr",
+      );
+      markSessionFailed(params.session);
+      const bgProc = backgroundProcesses.get(params.session.id);
+      if (bgProc) {
+        try {
+          bgProc.process.kill("SIGTERM");
+        } catch {
+          // Process may have already exited.
+        }
+      }
+    }
   };
 }
 
@@ -427,174 +405,24 @@ function markSessionFailed(session: ExecSession): void {
   const bgProcess = backgroundProcesses.get(session.id);
   if (bgProcess) {
     bgProcess.status = "failed";
+    scrubCompletedBackgroundOutput(bgProcess);
     scheduleBackgroundProcessCleanup(session.id);
   }
   scheduleExecSessionCleanup(session.id);
 }
 
 function markSessionClosed(session: ExecSession, code: number | null): void {
-  session.status = code === 0 ? "completed" : "failed";
+  session.status =
+    code === 0 && !session.outputWriteFailed ? "completed" : "failed";
   session.exitCode = code;
   const bgProcess = backgroundProcesses.get(session.id);
   if (bgProcess) {
     bgProcess.status = session.status;
     bgProcess.exitCode = code;
+    scrubCompletedBackgroundOutput(bgProcess);
     scheduleBackgroundProcessCleanup(session.id);
   }
   scheduleExecSessionCleanup(session.id);
-}
-
-function spawnPipeProcess(params: {
-  launcher: string[];
-  cwd: string;
-  env: NodeJS.ProcessEnv;
-  session: ExecSession;
-  outputFile: string;
-}): ProcessLauncher {
-  const [executable, ...args] = params.launcher;
-  if (!executable) {
-    throw new Error("Executable is required");
-  }
-
-  noteExpectedWorktreeForLauncher(params.launcher, params.cwd);
-  const childProcess: ChildProcess = spawn(executable, args, {
-    cwd: params.cwd,
-    env: params.env,
-    shell: false,
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: process.platform !== "win32",
-  });
-
-  const appendOutput = createSessionOutputAppender(params);
-
-  childProcess.stdout?.on("data", (chunk: Buffer) => {
-    appendOutput(chunk.toString("utf8"), "stdout");
-  });
-  childProcess.stderr?.on("data", (chunk: Buffer) => {
-    appendOutput(chunk.toString("utf8"), "stderr");
-  });
-
-  childProcess.on("error", (error) => {
-    appendOutput(error.message, "stderr");
-    markSessionFailed(params.session);
-  });
-
-  childProcess.on("close", (code) => {
-    markSessionClosed(params.session, code);
-  });
-
-  return {
-    kill(signal?: string | number) {
-      if (childProcess.pid && process.platform !== "win32") {
-        try {
-          process.kill(-childProcess.pid, signal as NodeJS.Signals);
-          return;
-        } catch {
-          // Fall back to killing the child directly below.
-        }
-      }
-      childProcess.kill(signal as NodeJS.Signals);
-    },
-    write(input: string) {
-      childProcess.stdin?.write(input);
-    },
-  };
-}
-
-function spawnPtyProcess(params: {
-  launcher: string[];
-  cwd: string;
-  env: NodeJS.ProcessEnv;
-  session: ExecSession;
-  outputFile: string;
-}): ProcessLauncher {
-  const [executable, ...args] = params.launcher;
-  if (!executable) {
-    throw new Error("Executable is required");
-  }
-
-  noteExpectedWorktreeForLauncher(params.launcher, params.cwd);
-  const appendOutput = createSessionOutputAppender(params);
-  const ptyEnv = buildPtyEnv(params.env);
-
-  if (typeof Bun !== "undefined") {
-    // node-pty's native handles do not integrate reliably when loaded into
-    // Bun's event loop. Local Bun dev/tests run the PTY inside a tiny Node
-    // bridge; the distributed CLI runs under Node and uses node-pty directly.
-    const childProcess: ChildProcess = spawn(
-      "node",
-      [
-        "-e",
-        NODE_PTY_BRIDGE_SCRIPT,
-        JSON.stringify({ executable, args, cwd: params.cwd }),
-      ],
-      {
-        cwd: params.cwd,
-        env: ptyEnv,
-        shell: false,
-        stdio: ["pipe", "pipe", "pipe"],
-        detached: process.platform !== "win32",
-      },
-    );
-
-    childProcess.stdout?.on("data", (chunk: Buffer) => {
-      appendOutput(chunk.toString("utf8"), "stdout");
-    });
-    childProcess.stderr?.on("data", (chunk: Buffer) => {
-      appendOutput(chunk.toString("utf8"), "stderr");
-    });
-    childProcess.on("error", (error) => {
-      appendOutput(error.message, "stderr");
-      markSessionFailed(params.session);
-    });
-    childProcess.on("close", (code) => {
-      markSessionClosed(params.session, code);
-    });
-
-    return {
-      kill(signal?: string | number) {
-        if (childProcess.pid && process.platform !== "win32") {
-          try {
-            process.kill(-childProcess.pid, signal as NodeJS.Signals);
-            return;
-          } catch {
-            // Fall back to killing the bridge directly below.
-          }
-        }
-        childProcess.kill(signal as NodeJS.Signals);
-      },
-      write(input: string) {
-        childProcess.stdin?.write(input);
-      },
-    };
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pty = require("node-pty") as NodePtyModule;
-  const ptyProcess = pty.spawn(executable, args, {
-    name: "xterm-256color",
-    cols: 80,
-    rows: 24,
-    cwd: params.cwd,
-    env: ptyEnv,
-  });
-
-  ptyProcess.onData((data) => appendOutput(data, "stdout"));
-  ptyProcess.onExit(({ exitCode }) => {
-    markSessionClosed(
-      params.session,
-      typeof exitCode === "number" ? exitCode : null,
-    );
-  });
-
-  return {
-    kill(signal?: string | number) {
-      ptyProcess.kill(typeof signal === "string" ? signal : undefined);
-    },
-    write(input: string) {
-      ptyProcess.write(input);
-    },
-  };
 }
 
 async function waitForSessionOutput(params: {
@@ -673,18 +501,26 @@ async function startExecSession(args: ExecCommandArgs): Promise<ExecSession> {
     status: "running",
     exitCode: null,
     tty: args.tty ?? false,
+    secrets: args.secretEnv ?? {},
   };
   execSessions.set(id, session);
 
-  let processLauncher: ProcessLauncher;
+  const appendOutput = createSessionOutputAppender({
+    session,
+    outputFile,
+    secrets: args.secretEnv ?? {},
+  });
+  let runningProcess: RunningShellProcess;
   try {
-    const spawnProcess = session.tty ? spawnPtyProcess : spawnPipeProcess;
-    processLauncher = spawnProcess({
-      launcher,
+    runningProcess = startShellProcess(launcher, {
       cwd,
       env: spawnEnv,
-      session,
-      outputFile,
+      timeoutMs: 0,
+      sourceCommand: args.cmd,
+      signal: args.signal,
+      tty: session.tty,
+      captureOutput: false,
+      onOutput: appendOutput,
     });
   } catch (error) {
     execSessions.delete(id);
@@ -692,7 +528,7 @@ async function startExecSession(args: ExecCommandArgs): Promise<ExecSession> {
   }
 
   backgroundProcesses.set(id, {
-    process: processLauncher,
+    process: runningProcess.process,
     command: args.cmd,
     stdout: [],
     stderr: [],
@@ -704,17 +540,25 @@ async function startExecSession(args: ExecCommandArgs): Promise<ExecSession> {
     totalStdoutLines: 0,
     totalStderrLines: 0,
     runtimeScope: args.parentScope,
+    secrets: session.secrets,
   });
   if (session.status !== "running") {
+    try {
+      runningProcess.process.kill("SIGTERM");
+    } catch {
+      // Process may have already exited.
+    }
     scheduleBackgroundProcessCleanup(id);
   }
 
-  args.signal?.addEventListener(
-    "abort",
-    () => {
-      processLauncher.kill("SIGTERM");
+  void runningProcess.completion.then(
+    ({ exitCode }) => markSessionClosed(session, exitCode),
+    (error: unknown) => {
+      if (error instanceof ShellExecutionError) {
+        appendOutput(error.message, "stderr");
+      }
+      markSessionFailed(session);
     },
-    { once: true },
   );
 
   return session;
@@ -750,13 +594,14 @@ export async function exec_command(
     output,
     originalTokenCount: estimateTokenCount(output),
     maxOutputTokens: args.max_output_tokens,
+    secrets: session.secrets,
   });
   if (sessionId === null) {
     releaseExecSession(session);
   }
 
   return {
-    output: formattedOutput,
+    output: scrubSecretsFromString(formattedOutput, session.secrets),
   };
 }
 
@@ -773,12 +618,16 @@ export async function write_stdin(
 
   const chars = args.chars ?? "";
   if (chars && !session.tty) {
-    throw new Error(
-      "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open",
-    );
+    if (chars === INTERRUPT) {
+      (backgroundProcess.process as ShellProcessHandle).interrupt();
+    } else {
+      throw new Error(
+        "stdin is closed for this session; rerun exec_command with tty=true to keep stdin open",
+      );
+    }
   }
-  if (chars) {
-    (backgroundProcess.process as ProcessLauncher).write(chars);
+  if (chars && session.tty) {
+    (backgroundProcess.process as ShellProcessHandle).write(chars);
     await sleep(100, args.signal);
   }
 
@@ -801,13 +650,14 @@ export async function write_stdin(
     output,
     originalTokenCount: estimateTokenCount(output),
     maxOutputTokens: args.max_output_tokens,
+    secrets: session.secrets,
   });
   if (nextSessionId === null) {
     releaseExecSession(session);
   }
 
   return {
-    output: formattedOutput,
+    output: scrubSecretsFromString(formattedOutput, session.secrets),
   };
 }
 

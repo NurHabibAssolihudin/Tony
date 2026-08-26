@@ -17,6 +17,7 @@ import {
   localLlmConfigModelPatch,
   normalizeLocalModelHandle,
 } from "@/backend/local/local-model-normalization";
+import { setupRuntimeModelCatalogFixture } from "@/test-utils/runtime-model-catalog";
 
 function localConversationDir(
   storageDir: string,
@@ -29,13 +30,14 @@ function localConversationDir(
   );
 }
 
+setupRuntimeModelCatalogFixture();
 describe("local model normalization", () => {
   afterEach(() => {
     clearRegisteredPiProviders();
   });
 
   test("preserves Pi catalog handles over stale legacy OpenAI metadata", () => {
-    const handle = "opencode/deepseek-v4-flash-free";
+    const handle = "opencode/kimi-k2.6";
 
     expect(
       normalizeLocalModelHandle(
@@ -49,7 +51,7 @@ describe("local model normalization", () => {
   test("runs a stored native Pi handle despite stale provider metadata", async () => {
     const storageDir = await mkdtemp(join(tmpdir(), "local-opencode-handle-"));
     try {
-      const handle = "opencode/deepseek-v4-flash-free";
+      const handle = "opencode/kimi-k2.6";
       const backend = new LocalBackend({ storageDir, memfsEnabled: false });
       const agent = await backend.createAgent({
         name: "Local",
@@ -64,7 +66,7 @@ describe("local model normalization", () => {
         { localProviderAuthStorageDir: storageDir },
       );
       expect(resolved.provider).toBe("opencode");
-      expect(resolved.model.id).toBe("deepseek-v4-flash-free");
+      expect(resolved.model.id).toBe("kimi-k2.6");
     } finally {
       await rm(storageDir, { recursive: true, force: true });
     }

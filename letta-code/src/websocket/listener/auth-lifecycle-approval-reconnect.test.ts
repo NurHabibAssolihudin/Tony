@@ -284,9 +284,9 @@ describe("listener approval reconnect timing", () => {
     await startClient();
     await waitFor(
       () =>
-        countConnectionsForChannel("control") === 1 &&
-        countConnectionsForChannel("stream") === 1,
-      "initial control and stream sockets did not open",
+        getActiveRuntime()?.connections.get("connection-id")?.initialized ===
+        true,
+      "initial listener connection did not initialize",
     );
 
     const listener = getActiveRuntime();
@@ -373,6 +373,7 @@ describe("listener approval reconnect timing", () => {
     });
 
     await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(conversationRuntime.loopStatus).toBe("PROCESSING_API_RESPONSE");
     expect(deps.executeApprovalBatch).toHaveBeenCalledTimes(0);
     expect(deps.ensureSecretsHydrated).toHaveBeenCalledTimes(0);
     expect(deps.sendApprovalContinuation).toHaveBeenCalledTimes(0);
@@ -437,9 +438,9 @@ describe("listener approval reconnect timing", () => {
     await startClient();
     await waitFor(
       () =>
-        countConnectionsForChannel("control") === 1 &&
-        countConnectionsForChannel("stream") === 1,
-      "initial control and stream sockets did not open",
+        getActiveRuntime()?.connections.get("connection-id")?.initialized ===
+        true,
+      "initial listener connection did not initialize",
     );
 
     const listener = getActiveRuntime();

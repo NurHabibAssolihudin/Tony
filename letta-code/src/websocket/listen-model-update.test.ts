@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -18,7 +18,13 @@ import {
 import { FakeHeadlessBackend } from "@/backend/dev/fake-headless-backend";
 import { LocalBackend } from "@/backend/local";
 import { settingsManager } from "@/settings-manager";
+import {
+  clearRuntimeModelCatalogFixture,
+  installRuntimeModelCatalogFixture,
+} from "@/test-utils/runtime-model-catalog";
+import { prepareToolExecutionContextForScope } from "@/tools/toolset";
 import { __listenClientTestUtils } from "@/websocket/listen-client";
+import { applyToolsetUpdateForRuntime } from "@/websocket/listener/commands/model-toolset";
 
 /**
  * Tests for the model update command logic.
@@ -34,6 +40,13 @@ function readModelToolsetCommandSource(): string {
     new URL("./listener/commands/model-toolset.ts", import.meta.url),
   );
   return readFileSync(commandPath, "utf-8");
+}
+
+function readCliConfigurationHandlerSource(): string {
+  const handlerPath = fileURLToPath(
+    new URL("../cli/app/use-configuration-handlers.ts", import.meta.url),
+  );
+  return readFileSync(handlerPath, "utf-8");
 }
 
 function readLocalChannelGatewaySource(): string {
@@ -65,61 +78,37 @@ class NativeChatGptCatalogBackend extends FakeHeadlessBackend {
   }
 }
 
+beforeEach(installRuntimeModelCatalogFixture);
+
 afterEach(async () => {
+  clearRuntimeModelCatalogFixture();
   clearAvailableModelsCache();
   __testSetBackend(null);
   await settingsManager.reset();
 });
 
 describe("listen-client model update status message", () => {
-  test("emits only model name when toolset did not change", () => {
+  test("does not add toolset details to the model update", () => {
     const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
       modelLabel: "Claude Sonnet 4",
-      toolsetChanged: false,
       toolsetError: null,
-      nextToolset: "default",
-      toolsetPreference: "auto",
     });
 
     expect(result.message).toBe("Model updated to Claude Sonnet 4.");
     expect(result.level).toBe("info");
   });
 
-  test("includes toolset notice when toolset changed (auto preference)", () => {
-    const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
-      modelLabel: "GPT-5",
-      toolsetChanged: true,
-      toolsetError: null,
-      nextToolset: "codex",
-      toolsetPreference: "auto",
-    });
+  test("does not add toolset details to the CLI model update", () => {
+    const source = readCliConfigurationHandlerSource();
 
-    expect(result.message).toContain("Model updated to GPT-5.");
-    expect(result.message).toContain("auto");
-    expect(result.level).toBe("info");
-  });
-
-  test("includes toolset notice when toolset changed (manual override)", () => {
-    const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
-      modelLabel: "GPT-5",
-      toolsetChanged: true,
-      toolsetError: null,
-      nextToolset: "codex",
-      toolsetPreference: "codex",
-    });
-
-    expect(result.message).toContain("Model updated to GPT-5.");
-    expect(result.message).toContain("Manual toolset override");
-    expect(result.level).toBe("info");
+    expect(source).not.toContain("Auto toolset selected: switched to");
+    expect(source).not.toContain("Manual toolset override remains active");
   });
 
   test("includes reasoning effort when updateArgs has reasoning_effort", () => {
     const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
       modelLabel: "Opus 4.6",
-      toolsetChanged: false,
       toolsetError: null,
-      nextToolset: "default",
-      toolsetPreference: "auto",
       updateArgs: { reasoning_effort: "medium" },
     });
 
@@ -130,10 +119,7 @@ describe("listen-client model update status message", () => {
   test("shows No Reasoning for reasoning_effort none", () => {
     const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
       modelLabel: "Opus 4.6",
-      toolsetChanged: false,
       toolsetError: null,
-      nextToolset: "default",
-      toolsetPreference: "auto",
       updateArgs: { reasoning_effort: "none" },
     });
 
@@ -143,40 +129,57 @@ describe("listen-client model update status message", () => {
   test("shows Max for reasoning_effort xhigh on older Anthropic models", () => {
     const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
       modelLabel: "Opus 4.6",
-      toolsetChanged: false,
       toolsetError: null,
-      nextToolset: "default",
-      toolsetPreference: "auto",
       updateArgs: { reasoning_effort: "xhigh" },
     });
 
     expect(result.message).toBe("Model updated to Opus 4.6 (Max).");
   });
 
-  test("shows Extra-High for reasoning_effort xhigh on Fable and Opus 4.7+", () => {
+  test("shows Extra High for reasoning_effort xhigh on Fable and Opus 4.7+", () => {
     for (const modelLabel of ["Fable 5", "Opus 4.7", "Opus 4.8"]) {
       const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
         modelLabel,
-        toolsetChanged: false,
         toolsetError: null,
-        nextToolset: "default",
-        toolsetPreference: "auto",
         updateArgs: { reasoning_effort: "xhigh" },
       });
 
       expect(result.message).toBe(
-        `Model updated to ${modelLabel} (Extra-High).`,
+        `Model updated to ${modelLabel} (Extra High).`,
       );
     }
+  });
+
+  test("shows Extra High for reasoning_effort xhigh on GPT-5.6 Sol ChatGPT", () => {
+    const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
+      modelLabel: "GPT-5.6 Sol (ChatGPT)",
+      toolsetError: null,
+      updateArgs: { reasoning_effort: "xhigh" },
+      modelHandle: "chatgpt-plus-pro/gpt-5.6-sol",
+    });
+
+    expect(result.message).toBe(
+      "Model updated to GPT-5.6 Sol (ChatGPT) (Extra High).",
+    );
+  });
+
+  test("shows Max for reasoning_effort max on GPT-5.6 Sol ChatGPT", () => {
+    const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
+      modelLabel: "GPT-5.6 Sol (ChatGPT)",
+      toolsetError: null,
+      updateArgs: { reasoning_effort: "max" },
+      modelHandle: "chatgpt-plus-pro/gpt-5.6-sol",
+    });
+
+    expect(result.message).toBe(
+      "Model updated to GPT-5.6 Sol (ChatGPT) (Max).",
+    );
   });
 
   test("omits effort when updateArgs has no reasoning_effort", () => {
     const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
       modelLabel: "GLM-5",
-      toolsetChanged: false,
       toolsetError: null,
-      nextToolset: "default",
-      toolsetPreference: "auto",
       updateArgs: { context_window: 180000 },
     });
 
@@ -186,10 +189,7 @@ describe("listen-client model update status message", () => {
   test("reports warning level when toolset switch failed", () => {
     const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
       modelLabel: "Claude Sonnet 4",
-      toolsetChanged: false,
       toolsetError: "Network timeout",
-      nextToolset: "default",
-      toolsetPreference: "auto",
     });
 
     expect(result.message).toContain("Model updated to Claude Sonnet 4.");
@@ -197,42 +197,19 @@ describe("listen-client model update status message", () => {
     expect(result.message).toContain("Network timeout");
     expect(result.level).toBe("warning");
   });
-
-  test("toolset error takes precedence over toolset change flag", () => {
-    const result = __listenClientTestUtils.buildModelUpdateStatusMessage({
-      modelLabel: "GPT-5",
-      toolsetChanged: true,
-      toolsetError: "API unreachable",
-      nextToolset: "codex",
-      toolsetPreference: "auto",
-    });
-
-    // Should show warning, not the toolset change notice
-    expect(result.message).toContain("Warning: toolset switch failed");
-    expect(result.message).not.toContain("auto");
-    expect(result.level).toBe("warning");
-  });
 });
 
 describe("listen-client applyModelUpdateForRuntime wiring", () => {
-  test("uses scoped runtime tool snapshots for change detection and wraps toolset refresh in try/catch", () => {
+  test("updates scoped runtime tools and wraps toolset refresh in try/catch", () => {
     const source = readModelToolsetCommandSource();
 
-    // Toolset change detection should compare scoped loaded-tool snapshots,
-    // not the mutable process-global registry.
-    expect(source).toContain(
-      "const previousToolNames = scopedRuntime.currentLoadedTools;",
-    );
     expect(source).toContain(
       "await ensureCorrectMemoryTool(agentId, model.handle)",
     );
     expect(source).toContain("await prepareToolExecutionContextForScope({");
     expect(source).toContain("overrideModel: model.handle");
     expect(source).toContain(
-      "scopedRuntime.currentLoadedTools = nextLoadedTools;",
-    );
-    expect(source).toContain(
-      "JSON.stringify(previousToolNames) !== JSON.stringify(nextLoadedTools)",
+      "preparedToolContext.preparedToolContext.loadedToolNames;",
     );
 
     // Tool refresh failures should still degrade cleanly to a warning.
@@ -478,6 +455,38 @@ describe("listen-client applyModelUpdateForRuntime wiring", () => {
     }
   });
 
+  test("resolves provider metadata for conversation model overrides", async () => {
+    const backend = new NativeChatGptCatalogBackend(
+      "agent-conversation-toolset",
+      undefined,
+      {},
+      { modelHandle: "anthropic/claude-sonnet-4-6" },
+    );
+    __testSetBackend(backend);
+    const agent = await backend.retrieveAgent("agent-conversation-toolset");
+    const conversation = await backend.createConversation({
+      agent_id: agent.id,
+      model: "chatgpt-jin/gpt-5.6-sol-fast",
+    } as ConversationCreateBody);
+
+    const prepared = await prepareToolExecutionContextForScope({
+      agentId: agent.id,
+      conversationId: conversation.id,
+      cachedAgent: {
+        ...agent,
+        model: "anthropic/claude-sonnet-4-6",
+        model_settings: { provider_type: "anthropic" },
+      },
+    });
+
+    expect(prepared.toolsetPreference).toBe("auto");
+    expect(prepared.toolset).toBe("codex");
+    expect(prepared.preparedToolContext.loadedToolNames).toContain(
+      "ApplyPatch",
+    );
+    expect(prepared.preparedToolContext.loadedToolNames).not.toContain("Edit");
+  });
+
   test("switches BYOK Opus 4.8 max update from stale ChatGPT provider state to default toolset", async () => {
     const storageDir = await mkdtemp(join(os.tmpdir(), "ws-byok-opus-max-"));
     const previousHome = process.env.HOME;
@@ -541,6 +550,155 @@ describe("listen-client applyModelUpdateForRuntime wiring", () => {
         (response.model_settings as Record<string, unknown> | null)?.reasoning,
       ).toBeUndefined();
     } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(storageDir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps manual toolsets scoped to one conversation", async () => {
+    const storageDir = await mkdtemp(join(os.tmpdir(), "ws-toolset-scope-"));
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = storageDir;
+      await settingsManager.reset();
+      await settingsManager.initialize();
+
+      const backend = new LocalBackend({
+        storageDir,
+        executionMode: "deterministic",
+      });
+      __testSetBackend(backend);
+      const agent = await backend.createAgent({
+        name: "Fable Toolset Agent",
+        model: "anthropic/claude-fable-5",
+        model_settings: { provider_type: "anthropic" },
+      } as AgentCreateBody);
+      const conversationA = await backend.createConversation({
+        agent_id: agent.id,
+      } as ConversationCreateBody);
+      const conversationB = await backend.createConversation({
+        agent_id: agent.id,
+      } as ConversationCreateBody);
+      settingsManager.setToolsetPreference(agent.id, "codex");
+
+      const listener = __listenClientTestUtils.createListenerRuntime();
+      const runtimeA = __listenClientTestUtils.getOrCreateConversationRuntime(
+        listener,
+        agent.id,
+        conversationA.id,
+      );
+      await applyToolsetUpdateForRuntime({
+        socket: new MockSocket() as unknown as WebSocket,
+        listener,
+        scopedRuntime: runtimeA,
+        requestId: "toolset-conv-a",
+        toolsetPreference: "codex",
+      });
+
+      expect(runtimeA.currentToolset).toBe("codex");
+      expect(
+        settingsManager.getToolsetPreference(agent.id, conversationA.id),
+      ).toBe("codex");
+      expect(
+        settingsManager.getToolsetPreference(agent.id, conversationB.id),
+      ).toBe("auto");
+      expect(
+        __listenClientTestUtils.buildDeviceStatus(listener, {
+          agent_id: agent.id,
+          conversation_id: conversationB.id,
+        }).current_toolset_preference,
+      ).toBe("auto");
+
+      const preparedB = await prepareToolExecutionContextForScope({
+        agentId: agent.id,
+        conversationId: conversationB.id,
+      });
+      expect(preparedB.toolsetPreference).toBe("auto");
+      expect(preparedB.toolset).toBe("default");
+      expect(preparedB.preparedToolContext.loadedToolNames).toContain("Edit");
+      expect(preparedB.preparedToolContext.loadedToolNames).not.toContain(
+        "ApplyPatch",
+      );
+
+      settingsManager.setToolsetPreference(
+        agent.id,
+        "gemini",
+        conversationB.id,
+      );
+      const originalModAdapter = listener.modAdapter;
+      listener.modAdapter = {
+        getAvailablePermissions: () => {
+          throw new Error("toolset preparation failed");
+        },
+      } as never;
+      try {
+        await expect(
+          applyToolsetUpdateForRuntime({
+            socket: new MockSocket() as unknown as WebSocket,
+            listener,
+            scopedRuntime: runtimeA,
+            requestId: "toolset-conv-a-failure",
+            toolsetPreference: "default",
+          }),
+        ).rejects.toThrow("toolset preparation failed");
+      } finally {
+        listener.modAdapter = originalModAdapter;
+      }
+      expect(
+        settingsManager.getToolsetPreference(agent.id, conversationA.id),
+      ).toBe("codex");
+      expect(
+        settingsManager.getToolsetPreference(agent.id, conversationB.id),
+      ).toBe("gemini");
+      expect(runtimeA.currentToolset).toBe("codex");
+
+      settingsManager.setToolsetPreference(
+        agent.id,
+        "default",
+        conversationB.id,
+      );
+      const manualDefaultB = await prepareToolExecutionContextForScope({
+        agentId: agent.id,
+        conversationId: conversationB.id,
+        overrideModel: "openai/gpt-5.4",
+        overrideProviderType: "openai",
+      });
+      expect(manualDefaultB.toolsetPreference).toBe("default");
+      expect(manualDefaultB.toolset).toBe("default");
+      settingsManager.setToolsetPreference(agent.id, "auto", conversationB.id);
+
+      await applyToolsetUpdateForRuntime({
+        socket: new MockSocket() as unknown as WebSocket,
+        listener,
+        scopedRuntime: runtimeA,
+        requestId: "toolset-conv-a-auto",
+        toolsetPreference: "auto",
+      });
+      expect(runtimeA.currentToolset).toBe("default");
+      expect(
+        settingsManager.getToolsetPreference(agent.id, conversationA.id),
+      ).toBe("auto");
+      expect(settingsManager.getToolsetPreference(agent.id)).toBe("codex");
+
+      settingsManager.setToolsetPreference(agent.id, "codex", conversationB.id);
+      const runtimeB = __listenClientTestUtils.getOrCreateConversationRuntime(
+        listener,
+        agent.id,
+        conversationB.id,
+      );
+      expect(runtimeB.currentToolset).toBeNull();
+      expect(
+        __listenClientTestUtils.buildDeviceStatus(listener, {
+          agent_id: agent.id,
+          conversation_id: conversationB.id,
+        }).current_toolset_preference,
+      ).toBe("codex");
+    } finally {
+      await settingsManager.reset();
       if (previousHome === undefined) {
         delete process.env.HOME;
       } else {

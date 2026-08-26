@@ -22,7 +22,8 @@ Letta Code** — tanpa frontend custom, tanpa Agent SDK, tanpa komponen tambahan
 | [Letta Code](https://github.com/letta-ai/letta-code) | Otak + interface: agen stateful dengan memori, dijalankan via CLI | ✅ Apache 2.0 (permissive) |
 | [Activepieces](https://github.com/activepieces/activepieces) | Mesin otomasi/aksi (Fase 2) | ⏳ **Masih dievaluasi** (MIT CE) |
 
-> Source Letta Code disalin ke `letta-code/` agar semua kebutuhan project tersimpan dalam satu repo.
+> Source Letta Code di-vendor ke `letta-code/` (tanpa `.git`) agar semua kebutuhan project
+> tersimpan dalam satu repo. Versi ter-pin: **v0.30.32** (upstream tag, commit `1e78870`).
 
 ## 📁 Struktur
 ```

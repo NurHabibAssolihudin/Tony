@@ -13,6 +13,7 @@ import {
 } from "@/agent/memory-filesystem";
 import { buildConversationMessagesCreateRequestBody } from "@/agent/message";
 import { models } from "@/agent/model";
+import * as personalityModule from "@/agent/personality";
 import {
   DEFAULT_CREATE_AGENT_PERSONALITIES,
   getPersonalityOption,
@@ -27,6 +28,7 @@ import { appendCronRunLog, getCronRunLogPath } from "@/cron";
 import type { MessageQueueItem } from "@/queue/queue-runtime";
 import type { LocalProjectSettings, Settings } from "@/settings-manager";
 import { settingsManager } from "@/settings-manager";
+import { setupRuntimeModelCatalogFixture } from "@/test-utils/runtime-model-catalog";
 import {
   backgroundProcesses,
   backgroundTasks,
@@ -119,6 +121,7 @@ class MockSocket {
   }
 }
 
+setupRuntimeModelCatalogFixture();
 afterEach(() => {
   __testSetBackend(null);
   clearExternalTools();
@@ -205,7 +208,6 @@ describe("listen-client parseServerMessage", () => {
         "linus",
         "kawaii",
       ]);
-
       for (const personality of [...DEFAULT_CREATE_AGENT_PERSONALITIES]) {
         const socket = new MockSocket(WebSocket.OPEN);
         const personalityOption = getPersonalityOption(personality);
@@ -218,13 +220,16 @@ describe("listen-client parseServerMessage", () => {
           provenance: "created",
         }));
         mock.module("../agent/personality", () => ({
+          ...personalityModule,
           createAgentForPersonality: createAgentForPersonalityMock,
         }));
-
+        const mockedPersonality = await import("../agent/personality");
+        expect(mockedPersonality.buildCreateAgentOptionsForPersonality).toBe(
+          personalityModule.buildCreateAgentOptionsForPersonality,
+        );
         const originalPinAgent = settingsManager.pinAgent;
         const pinAgentMock = mock(() => {});
         settingsManager.pinAgent = pinAgentMock;
-
         await __listenClientTestUtils.handleCreateAgentCommand(
           {
             type: "create_agent",
@@ -242,7 +247,6 @@ describe("listen-client parseServerMessage", () => {
           tags: ["origin:onboarding"],
         });
         expect(pinAgentMock).toHaveBeenCalledWith(`agent-${personality}`);
-
         const messages = socket.sentPayloads.map((payload) =>
           JSON.parse(payload),
         );
@@ -270,13 +274,12 @@ describe("listen-client parseServerMessage", () => {
         provenance: "created",
       }));
       mock.module("../agent/personality", () => ({
+        ...personalityModule,
         createAgentForPersonality: createAgentForPersonalityMock,
       }));
-
       const originalPinAgent = settingsManager.pinAgent;
       const pinAgentMock = mock(() => {});
       settingsManager.pinAgent = pinAgentMock;
-
       await __listenClientTestUtils.handleCreateAgentCommand(
         {
           type: "create_agent",
@@ -286,7 +289,6 @@ describe("listen-client parseServerMessage", () => {
         },
         socket as unknown as WebSocket,
       );
-
       settingsManager.pinAgent = originalPinAgent;
       expect(pinAgentMock).not.toHaveBeenCalled();
     });
@@ -2039,7 +2041,7 @@ describe("listen-client parseServerMessage", () => {
 });
 
 describe("listen-client model command helpers", () => {
-  test("buildListModelsEntries reflects models.json metadata", () => {
+  test("buildListModelsEntries reflects runtime catalog metadata", () => {
     const entries = __listenClientTestUtils.buildListModelsEntries();
 
     expect(entries.length).toBe(models.length);
@@ -2088,9 +2090,7 @@ describe("listen-client model command helpers", () => {
     });
 
     expect(resolved).not.toBeNull();
-    // Handle must be the explicit BYOK handle, not the base static handle
     expect(resolved?.handle).toBe(byokHandle);
-    // But id/label/updateArgs still come from the model_id entry
     expect(resolved?.id).toBe(models[0]?.id);
     expect(resolved?.label).toBe(models[0]?.label);
   });
@@ -2102,7 +2102,6 @@ describe("listen-client model command helpers", () => {
     });
 
     expect(resolved).not.toBeNull();
-    // Should resolve handle from the static entry, not from an explicit override
     expect(resolved?.handle).toBe(models[0]?.handle);
   });
 });
@@ -3660,24 +3659,24 @@ describe("listen-client v2 status builders", () => {
     });
   });
 
-  test("sync wiring converts recovered stale approvals into queued denials", () => {
+  test("sync wiring denies recovered stale approvals and never auto-runs them", () => {
     const recoveryPath = fileURLToPath(
-      new URL("../websocket/listener/recovery.ts", import.meta.url),
+      new URL("../websocket/listener/recovery-sync.ts", import.meta.url),
     );
     const source = readFileSync(recoveryPath, "utf-8");
-    const recoverySection =
-      source
-        .split("export async function recoverApprovalStateForSync")[1]
-        ?.split("export async function resolveRecoveredApprovalResponse")[0] ??
-      "";
 
-    expect(recoverySection).toContain(
+    // Replay-unsafe tools become stale denials; interactive tools are
+    // re-presented as recovered control requests (LET-10821). Neither path
+    // may classify or auto-execute restored approvals (#1876).
+    expect(source).toContain(
       "runtime.pendingInterruptedResults = buildFreshDenialApprovals(",
     );
-    expect(recoverySection).toContain("STALE_APPROVAL_RECOVERY_DENIAL_REASON");
-    expect(recoverySection).toContain("clearRecoveredApprovalState(runtime);");
-    expect(recoverySection).not.toContain("classifyApprovalsWithSuggestions(");
-    expect(recoverySection).not.toContain("buildRecoveredAutoDecisions(");
+    expect(source).toContain("STALE_APPROVAL_RECOVERY_DENIAL_REASON");
+    expect(source).toContain("clearRecoveredApprovalState(runtime);");
+    expect(source).toContain("isInteractiveApprovalTool");
+    expect(source).not.toContain("classifyApprovalsWithSuggestions(");
+    expect(source).not.toContain("buildRecoveredAutoDecisions(");
+    expect(source).not.toContain("executeApprovalBatch");
   });
 
   test("sync ignores backend recovered approvals while a live turn is already processing", async () => {

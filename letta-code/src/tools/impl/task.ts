@@ -23,9 +23,14 @@ import { spawnSubagent } from "@/agent/subagents/manager";
 import { getBackend } from "@/backend";
 import { runSubagentStopHooks } from "@/hooks";
 import { getCurrentWorkingDirectory } from "@/runtime-context";
+import { settingsManager } from "@/settings-manager";
 import { addToMessageQueue } from "@/utils/message-queue-bridge.js";
 import { sleep } from "@/utils/sleep";
-import { formatTaskNotification } from "@/utils/task-notifications.js";
+import {
+  formatTaskNotification,
+  resolveNotificationScope,
+} from "@/utils/task-notifications.js";
+import { copyGitHubPullRequestTags } from "./github-pull-request-tracker.js";
 import {
   appendToOutputFile,
   assertBackgroundTaskCapacity,
@@ -150,6 +155,7 @@ export interface SpawnBackgroundSubagentTaskResult {
 
 interface SpawnBackgroundSubagentTaskDeps {
   spawnSubagentImpl: typeof spawnSubagent;
+  copyGitHubPullRequestTagsImpl: typeof copyGitHubPullRequestTags;
   addToMessageQueueImpl: typeof addToMessageQueue;
   formatTaskNotificationImpl: typeof formatTaskNotification;
   runSubagentStopHooksImpl: typeof runSubagentStopHooks;
@@ -226,27 +232,6 @@ function writeTaskTranscriptResult(
     outputFile,
     `${header ? `${header}\n\n` : ""}[error] ${result.error || "Subagent execution failed"}\n\n[Task failed]\n`,
   );
-}
-
-function resolveParentScope(parentScope?: {
-  agentId: string;
-  conversationId: string;
-}): { agentId: string; conversationId: string } | undefined {
-  if (parentScope?.agentId) {
-    return {
-      agentId: parentScope.agentId,
-      conversationId: parentScope.conversationId || "default",
-    };
-  }
-
-  try {
-    return {
-      agentId: getCurrentAgentId(),
-      conversationId: getConversationId() ?? "default",
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -380,9 +365,11 @@ export function spawnBackgroundSubagentTask(
   const shouldEmitCompletionNotification =
     emitCompletionNotification ?? !silentCompletion;
 
-  const resolvedParentScope = resolveParentScope(parentScope);
+  const resolvedParentScope = resolveNotificationScope(parentScope);
 
   const spawnSubagentFn = deps?.spawnSubagentImpl ?? spawnSubagent;
+  const copyGitHubPullRequestTagsFn =
+    deps?.copyGitHubPullRequestTagsImpl ?? copyGitHubPullRequestTags;
   const addToMessageQueueFn = deps?.addToMessageQueueImpl ?? addToMessageQueue;
   const formatTaskNotificationFn =
     deps?.formatTaskNotificationImpl ?? formatTaskNotification;
@@ -453,6 +440,11 @@ export function spawnBackgroundSubagentTask(
     systemPromptOverride,
   )
     .then(async (result) => {
+      await copyGitHubPullRequestTagsFn(
+        result.conversationId,
+        resolvedParentScope?.conversationId,
+      );
+
       bgTask.status = result.success ? "completed" : "failed";
       if (result.error) {
         bgTask.error = result.error;
@@ -638,6 +630,25 @@ export function spawnBackgroundSubagentTask(
   return { taskId, outputFile, subagentId };
 }
 
+export async function inheritForkToolset(
+  agentId: string,
+  parentConversationId: string,
+  forkConversationId: string,
+): Promise<void> {
+  const parentToolset = settingsManager.getToolsetPreference(
+    agentId,
+    parentConversationId,
+  );
+  if (parentToolset === "auto") return;
+
+  settingsManager.setToolsetPreference(
+    agentId,
+    parentToolset,
+    forkConversationId,
+  );
+  await settingsManager.flush();
+}
+
 /**
  * Task tool - Launch a specialized subagent to handle complex tasks
  */
@@ -732,7 +743,9 @@ export async function task(args: TaskArgs): Promise<string> {
       const forkedConv = await getBackend().forkConversation(parentConvId, {
         ...(parentConvId === "default" ? { agentId: parentAgentId } : {}),
         hidden: true,
+        signal,
       });
+      await inheritForkToolset(parentAgentId, parentConvId, forkedConv.id);
       effectiveAgentId = parentAgentId;
       effectiveConversationId = forkedConv.id;
     } catch (error) {
@@ -745,7 +758,7 @@ export async function task(args: TaskArgs): Promise<string> {
   const prompt = inputPrompt;
 
   const isBackground = args.run_in_background ?? config.background;
-  const resolvedParentScope = resolveParentScope(args.parentScope);
+  const resolvedParentScope = resolveNotificationScope(args.parentScope);
 
   // Handle background execution
   if (isBackground) {
@@ -810,6 +823,13 @@ export async function task(args: TaskArgs): Promise<string> {
       parentAgentIdForSpawn,
       undefined,
       resolvedParentScope?.conversationId,
+    );
+
+    await copyGitHubPullRequestTags(
+      result.conversationId,
+      resolvedParentScope?.conversationId,
+      undefined,
+      signal,
     );
 
     // Mark subagent as completed in state store

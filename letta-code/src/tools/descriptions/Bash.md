@@ -1,6 +1,6 @@
 # Bash
 
-Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
+Executes a given bash command from the conversation's current working directory with optional timeout, ensuring proper handling and security measures.
 
 IMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.
 
@@ -26,6 +26,7 @@ Usage notes:
   - Write a clear, concise user-facing description of what this command does. This description may be shown directly in chat as part of a status row like `Running command: <description>` or `Ran command: <description>`. Describe the command's purpose, not its shell syntax. For simple commands, keep it brief (5-10 words). For complex commands (piped commands, obscure flags, or anything hard to understand at a glance), add enough context to clarify what it does.
   - If the output exceeds 30000 characters, output will be truncated before being returned to you.
   - You can use the `run_in_background` parameter to run the command in the background. Only use this if you don't need the result immediately and are OK being notified when the command completes later. You do not need to check the output right away - you'll be notified when it finishes. You do not need to use '&' at the end of the command when using this parameter.
+  - Pick between `run_in_background` and the Monitor tool by how many notifications you need. **One** ("tell me when the server is ready / the build finishes") → Bash with `run_in_background` and a command that exits when the condition is true, e.g. `until grep -q "Ready in" dev.log; do sleep 0.5; done`. You get a single completion notification when it exits. **One per occurrence** ("tell me every time an ERROR line appears") → use Monitor: each stdout line is an event — you keep working and notifications arrive in the chat. Foreground `sleep` is blocked; background the wait (`run_in_background` or Monitor) instead of polling BashOutput, and keep working.
   
   - Avoid using Bash with the `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
     - File search: Use Glob (NOT find or ls)
@@ -39,13 +40,8 @@ Usage notes:
     - If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m "message" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead.
     - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail
     - DO NOT use newlines to separate commands (newlines are ok in quoted strings)
-  - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of `cd`. You may use `cd` if the User explicitly requests it.
-    <good-example>
-    pytest /foo/bar/tests
-    </good-example>
-    <bad-example>
-    cd /foo/bar && pytest tests
-    </bad-example>
+  - Each Bash call starts from the conversation's current working directory. A `cd` affects only that command and does not change the directory used by later tool calls.
+  - To change the working directory for later tool calls, use `SetWorkingDirectory`. For a one-off command in another directory, use an absolute path or a command-specific option such as `git -C /path/to/repo status`.
 
 # Committing changes with git
 

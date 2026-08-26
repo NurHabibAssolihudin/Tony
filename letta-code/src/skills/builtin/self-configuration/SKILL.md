@@ -1,6 +1,6 @@
 ---
 name: self-configuration
-description: Inspect or modify Letta Code's own memory, model, context window, system prompt, compaction, permissions, toolsets, mods, skills, channels, schedules, and local runtime settings. Use when the user asks how this agent or conversation is configured, or asks you to change how you behave or how the harness runs you.
+description: Inspect or modify Letta Code's own memory, model, context window, system prompt, compaction, permissions, toolsets, mods, skills, channels, schedules, agent secrets, and local runtime settings. Use when the user asks how this agent or conversation is configured, or asks you to change how you behave or how the harness runs you.
 license: MIT
 ---
 
@@ -14,7 +14,7 @@ The important part is choosing the right layer. Do not smear a preference into d
 
 | Layer | Use it for | How to change it |
 | --- | --- | --- |
-| Memory and identity | Durable facts, style preferences, persona changes, project knowledge, reusable skills | Edit `$MEMORY_DIR` files and sync the memory repo |
+| Memory and identity | Facts worth retaining, style preferences, persona changes, project knowledge, reusable skills | Edit `$MEMORY_DIR` files and sync the memory repo |
 | Server agent fields | Default model, model settings, context limit, system prompt, compaction, agent name, description | Patch `/v1/agents/{agent_id}` |
 | Server conversation fields | Temporary model/context experiments for one conversation | Patch `/v1/conversations/{conversation_id}` |
 | Local settings | Permissions, environment variables, UI/runtime preferences, pinned agents, toolset overrides, reflection cadence | Edit `~/.letta/settings.json`, `./.letta/settings.json`, or `./.letta/settings.local.json` |
@@ -22,6 +22,7 @@ The important part is choosing the right layer. Do not smear a preference into d
 | Skills | Reusable procedural knowledge or bundled scripts | Load `creating-skills` or `acquiring-skills` |
 | Channels | Slack/Discord/Telegram/WhatsApp/Signal accounts, pairing, routing, listener state | Use `letta channels` or channel commands |
 | Schedules | Reminders and recurring prompts | Load `scheduling-tasks` and use `letta cron` |
+| Agent secrets | Per-agent `$NAME` credential values for shell commands | Use `letta secret` (or `/secret` in a session) |
 
 Decision rule: if the model should remember and reason about it, use memory. If the runtime must enforce it or route it before the model decides anything, use settings, API fields, mods, channels, or schedules.
 
@@ -92,10 +93,10 @@ Common files:
 | Path | Purpose |
 | --- | --- |
 | `$MEMORY_DIR/system/persona.md` | Identity, voice, behavioral defaults |
-| `$MEMORY_DIR/system/human.md` | Durable notes about the person you work with |
+| `$MEMORY_DIR/system/human.md` | Notes about the person you work with |
 | `$MEMORY_DIR/projects/` | Project-specific long-term context |
 | `$MEMORY_DIR/skills/` | Agent-owned reusable skills |
-| `$MEMORY_DIR/relationships/` | Durable relationship and collaboration notes |
+| `$MEMORY_DIR/relationships/` | Relationship and collaboration notes |
 
 After changing memory, inspect and commit the exact changed files. Push/sync according to the current harness reminder or the `syncing-memory-filesystem` skill; some environments sync committed memory automatically.
 
@@ -370,6 +371,24 @@ Never print provider keys. Shell expansion such as `--api-key "$OPENAI_API_KEY"`
 
 After connecting, verify the provider/model from the same backend and process that will run the agent. Do not infer success from a saved credential alone.
 
+## Agent secrets
+
+Agent-scoped secrets hold credential values that are referenced as `$NAME` in shell commands. Cloud agents store them server-side on the agent; local agents use OS secure storage. The harness substitutes `$NAME` at exec time and scrubs values from tool output, so values never enter agent context.
+
+```bash
+letta secret list                                   # names only, never values
+letta secret set GITHUB_TOKEN --env GITHUB_TOKEN    # ingest from the environment
+openssl rand -hex 32 | letta secret set WEBHOOK_TOKEN --stdin   # generate without seeing the value
+letta secret unset GITHUB_TOKEN                     # aliases: delete | remove | rm
+```
+
+Rules:
+
+- Pass the source variable *name* to `--env`, not `$NAME`. `--env $GITHUB_TOKEN` triggers harness substitution and places the resolved value in process arguments; `--env GITHUB_TOKEN` reads it from the CLI process environment without exposure.
+- Never echo secret values into tool output. Pipe generated credentials straight into `--stdin`.
+- Inside a session, `AGENT_ID`/`LETTA_AGENT_ID` resolves the target automatically; pass `--agent <agent-id>` otherwise.
+- A running session loads its secret cache at startup; CLI-side changes apply to new sessions. The `/secret` slash command manages the same store interactively and refreshes the live cache.
+
 ## Channels
 
 Use channels when the user wants to talk through Slack, Discord, Telegram, WhatsApp, or Signal.
@@ -423,7 +442,7 @@ letta --backend local
 letta --memfs
 ```
 
-Startup flags affect a new process only. They do not rewrite an already-running listener. Persist durable defaults in settings or server fields instead.
+Startup flags affect a new process only. They do not rewrite an already-running listener. Persist long-term defaults in settings or server fields instead.
 
 ### Existing listeners and long-running processes
 

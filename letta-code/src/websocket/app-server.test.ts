@@ -65,7 +65,6 @@ function expectWebSocketOpenFailure(
     const cleanup = () => {
       clearTimeout(timeout);
       socket.off("open", handleOpen);
-      socket.off("error", handleError);
     };
     const handleOpen = () => {
       cleanup();
@@ -74,11 +73,10 @@ function expectWebSocketOpenFailure(
     };
     const handleError = () => {
       cleanup();
-      terminateClient(socket);
       resolve();
     };
     socket.once("open", handleOpen);
-    socket.once("error", handleError);
+    socket.on("error", handleError);
   });
 }
 
@@ -144,10 +142,7 @@ function waitForClientPing(socket: WebSocket): Promise<void> {
 }
 
 function waitForClientClose(socket: WebSocket): Promise<void> {
-  if (
-    socket.readyState === WebSocket.CLOSED ||
-    socket.readyState === WebSocket.CLOSING
-  ) {
+  if (socket.readyState === WebSocket.CLOSED) {
     return Promise.resolve();
   }
   return new Promise((resolve, reject) => {

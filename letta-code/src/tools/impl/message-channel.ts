@@ -7,7 +7,10 @@
  */
 
 import {
+  createMessageChannelExternalToolResult,
+  type ExecuteMessageChannelOptions,
   executeMessageChannel,
+  executeMessageChannelExternalTool,
   type MessageChannelExecutionResolver,
 } from "@/channels/message-channel-executor";
 import type { MessageChannelIdempotencyScope } from "@/channels/message-channel-idempotency";
@@ -18,6 +21,8 @@ import {
 } from "@/channels/plugin-registry";
 import { getChannelRegistry } from "@/channels/registry";
 import { resolveEligibleProactiveSlackAccount } from "@/channels/slack/proactive-accounts";
+import { createProactiveSlackTransport } from "@/channels/slack/proactive-route";
+import type { ExternalToolCallResult } from "@/types/app-server-protocol";
 
 function createLocalMessageChannelResolver(): MessageChannelExecutionResolver {
   return {
@@ -60,7 +65,6 @@ function createLocalMessageChannelResolver(): MessageChannelExecutionResolver {
       }
       const eligibleAccount = resolveEligibleProactiveSlackAccount({
         agentId: params.scope.agentId,
-        conversationId: params.scope.conversationId,
         accountId: params.accountId,
       });
       if (typeof eligibleAccount === "string") return eligibleAccount;
@@ -78,10 +82,34 @@ function createLocalMessageChannelResolver(): MessageChannelExecutionResolver {
       return {
         accountId: eligibleAccount.account.accountId,
         target,
-        transport: eligibleAccount.adapter,
+        transport: createProactiveSlackTransport({
+          adapter: eligibleAccount.adapter,
+          accountId: eligibleAccount.account.accountId,
+          target,
+          agentId: params.scope.agentId,
+          conversationId: params.scope.conversationId,
+        }),
         messageActions,
       };
     },
+  };
+}
+
+function resolveLocalMessageChannelExecution(
+  args: MessageChannelArgs,
+  idempotencyScope?: MessageChannelIdempotencyScope | null,
+): ExecuteMessageChannelOptions | string {
+  if (!getChannelRegistry()) {
+    return "Error: Channel system is not initialized. Start with --channels flag.";
+  }
+  if (!args.parentScope) {
+    return "Error: MessageChannel requires execution scope (agentId + conversationId).";
+  }
+  return {
+    scope: args.parentScope,
+    resolver: createLocalMessageChannelResolver(),
+    channelTurnSources: args.channelTurnSources,
+    idempotencyScope,
   };
 }
 
@@ -89,16 +117,18 @@ export async function message_channel(
   args: MessageChannelArgs,
   idempotencyScope?: MessageChannelIdempotencyScope | null,
 ): Promise<string> {
-  if (!getChannelRegistry()) {
-    return "Error: Channel system is not initialized. Start with --channels flag.";
-  }
-  if (!args.parentScope) {
-    return "Error: MessageChannel requires execution scope (agentId + conversationId).";
-  }
-  return await executeMessageChannel(args, {
-    scope: args.parentScope,
-    resolver: createLocalMessageChannelResolver(),
-    channelTurnSources: args.channelTurnSources,
-    idempotencyScope,
-  });
+  const execution = resolveLocalMessageChannelExecution(args, idempotencyScope);
+  return typeof execution === "string"
+    ? execution
+    : await executeMessageChannel(args, execution);
+}
+
+export async function executeLocalMessageChannelExternalTool(
+  args: MessageChannelArgs,
+  idempotencyScope?: MessageChannelIdempotencyScope | null,
+): Promise<ExternalToolCallResult> {
+  const execution = resolveLocalMessageChannelExecution(args, idempotencyScope);
+  return typeof execution === "string"
+    ? createMessageChannelExternalToolResult(execution)
+    : await executeMessageChannelExternalTool(args, execution);
 }

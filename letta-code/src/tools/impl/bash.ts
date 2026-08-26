@@ -1,19 +1,29 @@
-import { spawn } from "node:child_process";
 import { INTERRUPTED_BY_USER } from "@/constants";
 import {
   consumeWorkingDirectoryRecovery,
   getCurrentWorkingDirectory,
 } from "@/runtime-context";
+import { scrubSecretsFromString } from "@/tools/secret-substitution";
+import { addToMessageQueue } from "@/utils/message-queue-bridge.js";
+import {
+  formatTaskNotification,
+  resolveNotificationScope,
+} from "@/utils/task-notifications.js";
 import { noteExpectedWorktreeForLauncher } from "@/websocket/listener/worktree-ownership";
+import {
+  commandRunsForegroundSleep,
+  FOREGROUND_SLEEP_BLOCKED_MESSAGE,
+} from "./foreground-sleep.js";
 import {
   appendBackgroundProcessOutput,
   appendToOutputFile,
   assertBackgroundProcessCapacity,
+  type BackgroundProcess,
   backgroundProcesses,
   createBackgroundOutputFile,
   getNextBashId,
   scheduleBackgroundProcessCleanup,
-  unrefTimer,
+  scrubCompletedBackgroundOutput,
 } from "./process_manager.js";
 import { getShellEnv } from "./shell-env.js";
 import {
@@ -21,7 +31,11 @@ import {
   selectAvailableShellLauncher,
   withStrictShellPrelude,
 } from "./shell-launchers.js";
-import { type ShellExecutionError, spawnWithLauncher } from "./shell-runner.js";
+import {
+  type ShellExecutionError,
+  spawnWithLauncher,
+  startShellProcess,
+} from "./shell-runner.js";
 import { applyShellSandbox } from "./shell-sandbox.js";
 import { LIMITS, truncateByChars } from "./truncation.js";
 import { validateRequiredParams } from "./validation.js";
@@ -53,7 +67,7 @@ function rebuildCachedLauncher(
  * For background processes, we can't easily do async fallback, so we rely on cached launcher
  * from previous foreground commands or the default launcher order.
  */
-function getBackgroundLauncher(
+export function getBackgroundLauncher(
   command: string,
   env: NodeJS.ProcessEnv,
   secretEnv?: Record<string, string>,
@@ -105,6 +119,7 @@ export async function spawnCommand(
       cwd: options.cwd,
       env: sandboxed.env,
       timeoutMs: options.timeout,
+      sourceCommand: command,
       signal: options.signal,
       onOutput: options.onOutput,
     });
@@ -119,6 +134,7 @@ export async function spawnCommand(
           cwd: options.cwd,
           env,
           timeoutMs: options.timeout,
+          sourceCommand: command,
           signal: options.signal,
           onOutput: options.onOutput,
         });
@@ -153,6 +169,7 @@ export async function spawnCommand(
         cwd: options.cwd,
         env,
         timeoutMs: options.timeout,
+        sourceCommand: command,
         signal: options.signal,
         onOutput: options.onOutput,
       });
@@ -172,6 +189,101 @@ export async function spawnCommand(
   const suffix = tried.filter(Boolean).join(", ");
   const reason = lastError?.message || "Shell unavailable";
   throw new Error(suffix ? `${reason} (tried: ${suffix})` : reason);
+}
+
+/** Lines of each stream to replay in a completion notification. */
+const NOTIFICATION_TAIL_LINES = 50;
+
+function formatStreamTail(
+  label: "stdout" | "stderr",
+  retainedLines: string[],
+  totalLines: number,
+): string | undefined {
+  if (retainedLines.length === 0) {
+    return undefined;
+  }
+  const tail = retainedLines.slice(-NOTIFICATION_TAIL_LINES);
+  const header =
+    tail.length < totalLines
+      ? `[${label} - last ${tail.length} of ${totalLines} lines]`
+      : `[${label}]`;
+  return `${header}\n${tail.join("\n")}`;
+}
+
+function formatBackgroundOutputTail(bgProcess: BackgroundProcess): string {
+  const sections = [
+    formatStreamTail(
+      "stdout",
+      bgProcess.stdout,
+      bgProcess.totalStdoutLines ?? bgProcess.stdout.length,
+    ),
+    formatStreamTail(
+      "stderr",
+      bgProcess.stderr,
+      bgProcess.totalStderrLines ?? bgProcess.stderr.length,
+    ),
+  ].filter(Boolean);
+
+  return sections.length > 0 ? sections.join("\n\n") : "(no output)";
+}
+
+/**
+ * Queue the completion notification for a background shell.
+ *
+ * Mirrors the subagent path in task.ts: format the same `<task-notification>`
+ * XML and hand it to the message-queue bridge, which wakes the parent turn.
+ * Bash.md promises the agent it will be notified when a `run_in_background`
+ * command finishes, so without this the agent plans around a wake-up that
+ * never arrives (letta-ai/letta-code#3226).
+ *
+ * Called from the shell runner's single completion promise, which settles
+ * exactly once, so the agent is woken exactly once per background shell.
+ */
+function notifyBackgroundCompletion(params: {
+  bashId: string;
+  description?: string;
+  outputFile: string;
+  bgProcess: BackgroundProcess;
+  scope: ReturnType<typeof resolveNotificationScope>;
+  status: "completed" | "failed";
+  detail: string;
+}): void {
+  const { bashId, description, outputFile, bgProcess, scope, status, detail } =
+    params;
+  if (bgProcess.completionNotificationSuppressed) {
+    return;
+  }
+
+  const label = description?.trim() || bgProcess.command;
+  const durationMs = bgProcess.startTime
+    ? Math.max(0, Date.now() - bgProcess.startTime.getTime())
+    : undefined;
+
+  const { content: result } = truncateByChars(
+    scrubSecretsFromString(
+      [`$ ${bgProcess.command}`, detail, formatBackgroundOutputTail(bgProcess)]
+        .filter(Boolean)
+        .join("\n\n"),
+      bgProcess.secrets ?? {},
+    ),
+    LIMITS.BASH_NOTIFICATION_CHARS,
+    "Bash",
+    { useMiddleTruncation: true },
+  );
+
+  addToMessageQueue({
+    kind: "task_notification",
+    text: formatTaskNotification({
+      taskId: bashId,
+      status,
+      summary: `Background command "${label}" ${status}`,
+      result,
+      outputFile,
+      usage: durationMs === undefined ? undefined : { durationMs },
+    }),
+    agentId: scope?.agentId,
+    conversationId: scope?.conversationId,
+  });
 }
 
 interface BashArgs {
@@ -198,7 +310,7 @@ export async function bash(args: BashArgs): Promise<BashResult> {
   const {
     command,
     timeout = 120000,
-    description: _description,
+    description,
     run_in_background = false,
     signal,
     onOutput,
@@ -206,6 +318,8 @@ export async function bash(args: BashArgs): Promise<BashResult> {
     parentScope,
   } = args;
   const userCwd = getCurrentWorkingDirectory();
+  const sanitizeOutput = (text: string) =>
+    scrubSecretsFromString(text, secretEnv ?? {});
 
   if (command === "/bg") {
     const processes = Array.from(backgroundProcesses.entries());
@@ -269,14 +383,39 @@ export async function bash(args: BashArgs): Promise<BashResult> {
     // inner shell from launcher inspection.
     noteExpectedWorktreeForLauncher(launcher, userCwd);
     const sandboxed = applyShellSandbox(launcher, userCwd, bgEnv);
-    const [bgExecutable, ...bgLauncherArgs] = sandboxed.launcher;
-    const childProcess = spawn(bgExecutable ?? executable, bgLauncherArgs, {
-      shell: false,
+    let bgProcess: BackgroundProcess;
+    let outputWriteFailed = false;
+    const runningProcess = startShellProcess(sandboxed.launcher, {
       cwd: userCwd,
       env: sandboxed.env,
+      timeoutMs: timeout > 0 ? timeout : 0,
+      sourceCommand: command,
+      captureOutput: false,
+      onOutput(text, stream) {
+        const sanitizedText = sanitizeOutput(text);
+        appendBackgroundProcessOutput(bgProcess, stream, sanitizedText);
+        const wrote = appendToOutputFile(
+          outputFile,
+          stream === "stderr" ? `[stderr] ${sanitizedText}` : sanitizedText,
+        );
+        if (!wrote && bgProcess.status === "running") {
+          outputWriteFailed = true;
+          appendBackgroundProcessOutput(
+            bgProcess,
+            "stderr",
+            "[output file write failed; output may be incomplete]",
+          );
+          bgProcess.status = "failed";
+          try {
+            runningProcess.process.kill("SIGTERM");
+          } catch {
+            // Process may have already exited.
+          }
+        }
+      },
     });
-    backgroundProcesses.set(bashId, {
-      process: childProcess,
+    bgProcess = {
+      process: runningProcess.process,
       command,
       stdout: [],
       stderr: [],
@@ -288,51 +427,63 @@ export async function bash(args: BashArgs): Promise<BashResult> {
       totalStdoutLines: 0,
       totalStderrLines: 0,
       runtimeScope: parentScope,
-    });
-    const bgProcess = backgroundProcesses.get(bashId);
-    if (!bgProcess) {
-      throw new Error("Failed to track background process state");
-    }
-    childProcess.stdout?.on("data", (data: Buffer) => {
-      const text = data.toString();
-      appendBackgroundProcessOutput(bgProcess, "stdout", text);
-      // Also write to output file
-      appendToOutputFile(outputFile, text);
-    });
-    childProcess.stderr?.on("data", (data: Buffer) => {
-      const text = data.toString();
-      appendBackgroundProcessOutput(bgProcess, "stderr", text);
-      // Also write to output file (prefixed with [stderr])
-      appendToOutputFile(outputFile, `[stderr] ${text}`);
-    });
-    childProcess.on("exit", (code: number | null) => {
-      bgProcess.status = code === 0 ? "completed" : "failed";
-      bgProcess.exitCode = code;
-      appendToOutputFile(outputFile, `\n[exit code: ${code}]\n`);
-      scheduleBackgroundProcessCleanup(bashId);
-    });
-    childProcess.on("error", (err: Error) => {
-      bgProcess.status = "failed";
-      appendBackgroundProcessOutput(bgProcess, "stderr", err.message);
-      appendToOutputFile(outputFile, `\n[error] ${err.message}\n`);
-      scheduleBackgroundProcessCleanup(bashId);
-    });
-    if (timeout && timeout > 0) {
-      const timeoutHandle = setTimeout(() => {
-        if (bgProcess.status === "running") {
-          childProcess.kill("SIGTERM");
-          bgProcess.status = "failed";
-          appendBackgroundProcessOutput(
-            bgProcess,
-            "stderr",
-            `Command timed out after ${timeout}ms`,
-          );
-          appendToOutputFile(outputFile, `\n[timeout after ${timeout}ms]\n`);
-          scheduleBackgroundProcessCleanup(bashId);
-        }
-      }, timeout);
-      unrefTimer(timeoutHandle);
-    }
+      secrets: secretEnv,
+    };
+    backgroundProcesses.set(bashId, bgProcess);
+
+    // Resolve the routing scope now rather than on completion: by the time the
+    // shell exits the turn that launched it is gone, so the process-global
+    // agent context may already point at a different conversation.
+    const notificationScope = resolveNotificationScope(parentScope);
+
+    void runningProcess.completion.then(
+      ({ exitCode }) => {
+        bgProcess.status =
+          exitCode === 0 && !outputWriteFailed ? "completed" : "failed";
+        bgProcess.exitCode = exitCode;
+        appendToOutputFile(outputFile, `\n[exit code: ${exitCode}]\n`);
+        scrubCompletedBackgroundOutput(bgProcess);
+        notifyBackgroundCompletion({
+          bashId,
+          description,
+          outputFile,
+          bgProcess,
+          scope: notificationScope,
+          status: exitCode === 0 && !outputWriteFailed ? "completed" : "failed",
+          detail: outputWriteFailed
+            ? "Output file write failed; output may be incomplete"
+            : exitCode === null
+              ? "Terminated by signal before exiting"
+              : `Exit code: ${exitCode}`,
+        });
+        scheduleBackgroundProcessCleanup(bashId);
+      },
+      (error: unknown) => {
+        const err = error as Error & { killed?: boolean };
+        const message = sanitizeOutput(
+          err.killed ? `Command timed out after ${timeout}ms` : err.message,
+        );
+        bgProcess.status = "failed";
+        appendBackgroundProcessOutput(bgProcess, "stderr", message);
+        appendToOutputFile(
+          outputFile,
+          err.killed
+            ? `\n[timeout after ${timeout}ms]\n`
+            : `\n[error] ${message}\n`,
+        );
+        scrubCompletedBackgroundOutput(bgProcess);
+        notifyBackgroundCompletion({
+          bashId,
+          description,
+          outputFile,
+          bgProcess,
+          scope: notificationScope,
+          status: "failed",
+          detail: err.killed ? message : `Error: ${message}`,
+        });
+        scheduleBackgroundProcessCleanup(bashId);
+      },
+    );
     return {
       content: [
         {
@@ -341,6 +492,13 @@ export async function bash(args: BashArgs): Promise<BashResult> {
         },
       ],
       status: "success",
+    };
+  }
+
+  if (commandRunsForegroundSleep(command)) {
+    return {
+      content: [{ type: "text", text: FOREGROUND_SLEEP_BLOCKED_MESSAGE }],
+      status: "error",
     };
   }
 
@@ -363,7 +521,7 @@ export async function bash(args: BashArgs): Promise<BashResult> {
       output || "(Command completed with no output)",
       LIMITS.BASH_OUTPUT_CHARS,
       "Bash",
-      { workingDirectory: userCwd, toolName: "Bash" },
+      { workingDirectory: userCwd, toolName: "Bash", secrets: secretEnv },
     );
 
     // Non-zero exit code is an error
@@ -416,7 +574,7 @@ export async function bash(args: BashArgs): Promise<BashResult> {
       errorMessage.trim() || "Command failed with unknown error",
       LIMITS.BASH_OUTPUT_CHARS,
       "Bash",
-      { workingDirectory: userCwd, toolName: "Bash" },
+      { workingDirectory: userCwd, toolName: "Bash", secrets: secretEnv },
     );
 
     return {

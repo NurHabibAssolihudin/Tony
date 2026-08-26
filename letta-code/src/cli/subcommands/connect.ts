@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { parseLocalProviderTimeout } from "@/backend/local/local-provider-timeout";
 import {
   type LocalOAuthConnectCallbacks,
+  runCloudOAuthConnectFlow,
   runLocalOAuthConnectFlow,
 } from "@/cli/commands/connect-local-oauth";
 import {
@@ -26,6 +27,7 @@ import {
   checkProviderApiKey,
   createOrUpdateProvider,
   type ProviderConnectionOptions,
+  type ProviderOperationOptions,
   providerStorageTargetLabel,
 } from "@/providers/byok-providers";
 import {
@@ -62,6 +64,7 @@ interface ConnectSubcommandDeps {
     accessKey?: string,
     region?: string,
     profile?: string,
+    operationOptions?: ProviderOperationOptions,
   ) => Promise<void>;
   createOrUpdateProvider: (
     providerType: string,
@@ -76,6 +79,7 @@ interface ConnectSubcommandDeps {
   runChatGPTOAuthConnectFlow: (
     callbacks: ChatGPTOAuthFlowCallbacks,
   ) => Promise<unknown>;
+  runCloudOAuthConnectFlow: typeof runCloudOAuthConnectFlow;
   runLocalOAuthConnectFlow: (
     provider: Parameters<typeof runLocalOAuthConnectFlow>[0],
     callbacks: LocalOAuthConnectCallbacks,
@@ -106,6 +110,7 @@ const DEFAULT_DEPS: ConnectSubcommandDeps = {
         getOpenAICodexProvider({}, providerName ?? OPENAI_CODEX_PROVIDER_NAME),
     }),
   runChatGPTOAuthConnectFlow,
+  runCloudOAuthConnectFlow,
   runLocalOAuthConnectFlow,
   providerStorageTargetLabel,
 };
@@ -252,6 +257,27 @@ export async function runConnectSubcommand(
     try {
       if (provider.target !== "local") {
         await io.ensureSettingsReady();
+        if (
+          provider.byokProvider.oauthProviderId !== "openai-codex" &&
+          provider.byokProvider.providerType !== "chatgpt_oauth"
+        ) {
+          const result = await io.runCloudOAuthConnectFlow(
+            provider.byokProvider,
+            { onStatus: (status) => io.stdout(status) },
+          );
+          const providerName =
+            typeof result === "object" &&
+            result !== null &&
+            "providerName" in result &&
+            typeof result.providerName === "string"
+              ? result.providerName
+              : provider.byokProvider.providerName;
+          io.stdout(
+            `Successfully connected to ${provider.byokProvider.displayName}.\nProvider '${providerName}' saved.`,
+          );
+          return 0;
+        }
+
         let providerName: string;
         try {
           providerName = normalizeChatGPTOAuthProviderName(
@@ -466,7 +492,23 @@ export async function runConnectSubcommand(
       if (provider.target !== "local") {
         await io.ensureSettingsReady();
       }
-      await io.checkProviderApiKey(provider.byokProvider.providerType, apiKey);
+      if (hasConnectionOptions(connectionOptions)) {
+        // The API key must be validated against the user-supplied endpoint, not
+        // the provider's default one, or third-party keys fail with a 401.
+        await io.checkProviderApiKey(
+          provider.byokProvider.providerType,
+          apiKey,
+          undefined,
+          undefined,
+          undefined,
+          { connection: connectionOptions },
+        );
+      } else {
+        await io.checkProviderApiKey(
+          provider.byokProvider.providerType,
+          apiKey,
+        );
+      }
 
       io.stdout("Saving provider...");
       if (hasConnectionOptions(connectionOptions)) {

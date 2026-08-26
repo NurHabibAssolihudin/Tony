@@ -17,6 +17,7 @@ import type {
   QueueRuntime,
 } from "@/queue/queue-runtime";
 import type { SharedReminderState } from "@/reminders/state";
+import type { RuntimeWorkspaceSandbox } from "@/runtime-context";
 import type { ToolsetName, ToolsetPreference } from "@/tools/toolset";
 import type {
   ApprovalResponseBody,
@@ -27,6 +28,7 @@ import type {
   LoopStatus,
   RuntimeScope,
   StopReasonType,
+  TeleportContinuation,
   WsProtocolCommand,
 } from "@/types/protocol_v2";
 import type {
@@ -40,6 +42,7 @@ export interface StartListenerOptions {
   connectionId: string;
   wsUrl: string;
   supportsSplitStatusChannels?: boolean;
+  supportsPairedListenerGenerations?: boolean;
   deviceId: string;
   connectionName: string;
   skillsDirectory?: string;
@@ -136,6 +139,19 @@ export interface PendingExternalToolCall {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+export type PendingTeleport = {
+  teleportId: string;
+  connectionId: ListenerConnectionId;
+  agentId: string;
+  conversationId: string;
+  requestedAt: number;
+  drainAcceptedInputs: boolean;
+  activeTurn: boolean;
+  readyAt?: number;
+  error?: string;
+  continuation?: TeleportContinuation;
+};
+
 export interface ModeChangePayload {
   mode: "standard" | "acceptEdits" | "unrestricted" | "strict";
 }
@@ -191,6 +207,8 @@ export type ConversationRuntime = {
   conversationId: string;
   /** Runtime-scoped SDK override. Undefined uses the process defaults. */
   skillSources: SkillSource[] | undefined;
+  /** Explicit runtime filesystem boundary for shared app-server sessions. */
+  workspaceSandbox: RuntimeWorkspaceSandbox | undefined;
   /** Connection currently executing this conversation's turn, if client-owned. */
   activeConnectionId: ListenerConnectionId | null;
   turnLifecycle: TurnLifecycle;
@@ -210,6 +228,8 @@ export type ConversationRuntime = {
   readonly cancelRequested: boolean;
   queueRuntime: QueueRuntime;
   queuedMessagesByItemId: Map<string, IncomingMessage>;
+  /** Exact send identities carried by each batch removed from the queue. */
+  dequeuedClientMessageIdsByBatchId: Map<string, string[]>;
   queuePumpActive: boolean;
   queuePumpScheduled: boolean;
   pendingTurns: number;
@@ -218,6 +238,7 @@ export type ConversationRuntime = {
   currentToolsetPreference: ToolsetPreference;
   currentLoadedTools: string[];
   currentAvailableSkills: AvailableSkillSummary[];
+  transientChannelRuntimeTools: boolean;
   pendingApprovalBatchByToolCallId: Map<string, string>;
   /**
    * tool_call_id -> server-assigned id of the approval_request_message that
@@ -304,6 +325,8 @@ export type ListenerRuntime = {
   /** Coalesces concurrent first-loads for one agent's scoped adapter. */
   agentModAdapterLoads?: Map<string, Promise<ModAdapter | null>>;
   sessionId: string;
+  /** Increments once for every control/stream reconnect pair. */
+  nextConnectionAttempt: number;
   /** Monotonic allocator used for deterministic connection ordering. */
   nextConnectionOrdinal: number;
   /** All currently open listener transports, keyed by explicit identity. */
@@ -353,6 +376,8 @@ export type ListenerRuntime = {
   connectionId: string | null;
   connectionName: string | null;
   conversationRuntimes: Map<string, ConversationRuntime>;
+  /** Recent run-to-send snapshots survive idle conversation runtime eviction. */
+  clientMessageIdsByRunIdByConversation?: Map<string, Map<string, string[]>>;
   /** Per-conversation worktree directory watchers for CWD auto-detection fallback. */
   worktreeWatcherByConversation: Map<
     string,
@@ -367,6 +392,8 @@ export type ListenerRuntime = {
   /** Agent IDs whose cached secrets are stale and must re-fetch on the next hydration call. */
   secretsDirtyAgents: Set<string>;
   pendingExternalToolCalls: Map<string, PendingExternalToolCall>;
+  /** Source handoffs retained briefly so a failed destination can resume. */
+  pendingTeleports?: Map<string, PendingTeleport>;
   /**
    * Agent metadata warmups for listen-mode reminders. The cached promise is
    * reused while the listener stays connected so first-turn reminders can join
@@ -392,6 +419,8 @@ export type ListenerRuntime = {
   _unsubscribeSubagentState?: (() => void) | undefined;
   /** Unsubscribe from subagent stream events (set on socket open, cleared on close). */
   _unsubscribeSubagentStreamEvents?: (() => void) | undefined;
+  /** Unsubscribe from background process state (set on socket open, cleared on close). */
+  _unsubscribeBackgroundProcessState?: (() => void) | undefined;
 };
 
 export interface InterruptPopulateInput {

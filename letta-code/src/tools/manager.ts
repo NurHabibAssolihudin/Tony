@@ -61,6 +61,7 @@ import { debugLog } from "@/utils/debug";
 import { refreshAndListSecrets } from "@/utils/secrets-store";
 import { isRecord } from "@/utils/type-guards";
 import { serializeClientTools } from "./client-tool-serialization";
+import { normalizeExternalToolResultContent } from "./external-tool-content";
 import { toolFilter } from "./filter";
 import { clampToolReturnContent } from "./impl/tool-return-clamp";
 import {
@@ -77,6 +78,7 @@ import {
   scrubSecretsFromString,
 } from "./secret-substitution";
 import { TOOL_DEFINITIONS, type ToolName } from "./tool-definitions";
+import { TOOL_PERMISSIONS } from "./tool-permissions";
 
 export const TOOL_NAMES = Object.keys(TOOL_DEFINITIONS) as ToolName[];
 
@@ -144,6 +146,7 @@ const STREAMING_SHELL_TOOLS = new Set([
   "Shell",
   "run_shell_command",
   "RunShellCommand",
+  "Monitor",
 ]);
 
 // Tools that write files — used to trigger onFileWrite broadcast after execution.
@@ -224,7 +227,10 @@ export function filterBuiltInToolNamesByClientAllowlist(
   );
 }
 
-const WORKTREE_TOOL_NAMES = new Set<ToolName>(["EnterWorktree"]);
+const WORKTREE_TOOL_NAMES = new Set<ToolName>([
+  "EnterWorktree",
+  "ExitWorktree",
+]);
 const ARTIFACT_TOOL_NAMES: ToolName[] = [
   "read_artifact_file",
   "write_artifact_file",
@@ -365,8 +371,10 @@ function filterModToolsByClientAllowlist(
 export const ANTHROPIC_DEFAULT_TOOLS: ToolName[] = [
   "AskUserQuestion",
   "Bash",
+  "Monitor",
   "TaskOutput",
-  "EnterWorktree",
+  ...WORKTREE_TOOL_NAMES,
+  "SetWorkingDirectory",
   "Edit",
   "TaskStop",
   // "MultiEdit",
@@ -400,7 +408,8 @@ export const GEMINI_DEFAULT_TOOLS: ToolName[] = [
   "glob_gemini",
   "search_file_content",
   "memory",
-  "EnterWorktree",
+  ...WORKTREE_TOOL_NAMES,
+  "SetWorkingDirectory",
   "replace",
   "write_file_gemini",
   "write_todos",
@@ -413,9 +422,11 @@ export const GEMINI_DEFAULT_TOOLS: ToolName[] = [
 export const OPENAI_PASCAL_TOOLS: ToolName[] = [
   // Additional Letta Code tools
   "AskUserQuestion",
-  "EnterWorktree",
+  ...WORKTREE_TOOL_NAMES,
+  "SetWorkingDirectory",
   "memory_apply_patch",
   "Task",
+  "Monitor",
   "TaskOutput",
   "TaskStop",
   "Skill",
@@ -430,7 +441,8 @@ export const OPENAI_PASCAL_TOOLS: ToolName[] = [
 export const GEMINI_PASCAL_TOOLS: ToolName[] = [
   // Additional Letta Code tools
   "AskUserQuestion",
-  "EnterWorktree",
+  ...WORKTREE_TOOL_NAMES,
+  "SetWorkingDirectory",
   "memory",
   "Skill",
   "Task",
@@ -445,78 +457,6 @@ export const GEMINI_PASCAL_TOOLS: ToolName[] = [
   "WriteTodos",
   "ReadManyFiles",
 ];
-
-// Tool permissions configuration
-const TOOL_PERMISSIONS: Record<
-  ToolName,
-  { requiresApproval: boolean; approvalPolicy?: ToolApprovalPolicy }
-> = {
-  AskUserQuestion: { requiresApproval: true },
-  Bash: { requiresApproval: true },
-  BashOutput: { requiresApproval: false },
-  TaskOutput: { requiresApproval: false },
-  EnterWorktree: { requiresApproval: true },
-  Edit: { requiresApproval: true },
-  Glob: { requiresApproval: false },
-  Grep: { requiresApproval: false },
-  KillBash: { requiresApproval: true },
-  TaskStop: { requiresApproval: true },
-  LS: { requiresApproval: false },
-  memory: { requiresApproval: false },
-  memory_apply_patch: { requiresApproval: false },
-  MultiEdit: { requiresApproval: true },
-  Read: { requiresApproval: false },
-  read_artifact_file: { requiresApproval: false },
-  view_image: { requiresApproval: false },
-  ViewImage: { requiresApproval: false },
-  ReadLSP: { requiresApproval: false },
-  Skill: { requiresApproval: false },
-  Task: { requiresApproval: true },
-  TaskCreate: { requiresApproval: false },
-  TaskGet: { requiresApproval: false },
-  TaskList: { requiresApproval: false },
-  TaskUpdate: { requiresApproval: false },
-  TodoWrite: { requiresApproval: false },
-  Write: { requiresApproval: true },
-  write_artifact_file: { requiresApproval: false },
-  shell_command: { requiresApproval: true },
-  exec_command: { requiresApproval: true },
-  write_stdin: { requiresApproval: false },
-  shell: { requiresApproval: true },
-  read_file: { requiresApproval: false },
-  list_dir: { requiresApproval: false },
-  grep_files: { requiresApproval: false },
-  apply_patch: { requiresApproval: true },
-  update_plan: { requiresApproval: false },
-  // Gemini toolset
-  glob_gemini: { requiresApproval: false },
-  list_directory: { requiresApproval: false },
-  read_file_gemini: { requiresApproval: false },
-  read_many_files: { requiresApproval: false },
-  replace: { requiresApproval: true },
-  run_shell_command: { requiresApproval: true },
-  search_file_content: { requiresApproval: false },
-  write_todos: { requiresApproval: false },
-  write_file_gemini: { requiresApproval: true },
-  // Codex-2 toolset (PascalCase)
-  ShellCommand: { requiresApproval: true },
-  Shell: { requiresApproval: true },
-  ReadFile: { requiresApproval: false },
-  ListDir: { requiresApproval: false },
-  GrepFiles: { requiresApproval: false },
-  ApplyPatch: { requiresApproval: true },
-  UpdatePlan: { requiresApproval: false },
-  // Gemini-2 toolset (PascalCase)
-  RunShellCommand: { requiresApproval: true },
-  ReadFileGemini: { requiresApproval: false },
-  ListDirectory: { requiresApproval: false },
-  GlobGemini: { requiresApproval: false },
-  SearchFileContent: { requiresApproval: false },
-  Replace: { requiresApproval: true },
-  WriteFileGemini: { requiresApproval: true },
-  WriteTodos: { requiresApproval: false },
-  ReadManyFiles: { requiresApproval: false },
-};
 
 type ToolArgs = Record<string, unknown>;
 
@@ -953,15 +893,9 @@ export async function executeExternalTool(
       tool ? { tool } : undefined,
     );
 
-    // Convert external tool result to ToolExecutionResult format
-    const textContent = result.content
-      .filter((c) => c.type === "text" && c.text)
-      .map((c) => c.text)
-      .join("\n");
-
     return {
       toolReturn: clampToolReturnContent(
-        textContent || JSON.stringify(result.content),
+        normalizeExternalToolResultContent(result.content),
         toolName,
       ),
       status: result.isError ? "error" : "success",
@@ -1321,10 +1255,10 @@ export async function checkToolPermission(
       permissionMode: effectivePermissionModeState?.mode ?? null,
       workingDirectory: effectiveWorkingDirectory,
     });
-
   const permissions = await loadPermissions(effectiveWorkingDirectory);
   return runWithRuntimeContext(
     {
+      ...(context?.runtimeContext ?? {}),
       ...(effectiveAgentId ? { agentId: effectiveAgentId } : {}),
       workingDirectory: effectiveWorkingDirectory,
       permissionMode: effectivePermissionModeState?.mode,
@@ -1826,36 +1760,30 @@ function scrubInvocationSecretRedactions(
 
 function scrubModToolString(
   input: string,
-  agentId: string | undefined,
   redactions: InvocationSecretRedactions,
 ): string {
-  return scrubInvocationSecretRedactions(
-    scrubSecretsFromString(input, agentId),
-    redactions,
-  );
+  return scrubInvocationSecretRedactions(input, redactions);
 }
 
 function scrubModToolReturnContent(
   content: ToolReturnContent,
-  agentId: string | undefined,
   redactions: InvocationSecretRedactions,
 ): ToolReturnContent {
   if (typeof content === "string") {
-    return scrubModToolString(content, agentId, redactions);
+    return scrubModToolString(content, redactions);
   }
   return content.map((block) =>
     block.type === "text"
-      ? { ...block, text: scrubModToolString(block.text, agentId, redactions) }
+      ? { ...block, text: scrubModToolString(block.text, redactions) }
       : block,
   );
 }
 
 function scrubModToolLines(
   lines: string[] | undefined,
-  agentId: string | undefined,
   redactions: InvocationSecretRedactions,
 ): string[] | undefined {
-  return lines?.map((line) => scrubModToolString(line, agentId, redactions));
+  return lines?.map((line) => scrubModToolString(line, redactions));
 }
 
 function createScrubbedError(error: unknown, message: string): Error {
@@ -2269,13 +2197,7 @@ async function executeModTool(
           ? {
               onOutput: (chunk: string, stream: "stdout" | "stderr") => {
                 options.onOutput?.(
-                  stripAnsi(
-                    scrubModToolString(
-                      chunk,
-                      options.scopedAgentId,
-                      redactions,
-                    ),
-                  ),
+                  stripAnsi(scrubModToolString(chunk, redactions)),
                   stream,
                 );
               },
@@ -2306,21 +2228,15 @@ async function executeModTool(
       const recordResult = isRecord(result) ? result : undefined;
       const stdout = scrubModToolLines(
         isStringArray(recordResult?.stdout) ? recordResult.stdout : undefined,
-        options.scopedAgentId,
         redactions,
       );
       const stderr = scrubModToolLines(
         isStringArray(recordResult?.stderr) ? recordResult.stderr : undefined,
-        options.scopedAgentId,
         redactions,
       );
       const toolStatus = getModToolStatus(result);
       const flattenedResponse = clampToolReturnContent(
-        scrubModToolReturnContent(
-          flattenToolResponse(result),
-          options.scopedAgentId,
-          redactions,
-        ),
+        scrubModToolReturnContent(flattenToolResponse(result), redactions),
         toolName,
       );
       const responseSize =
@@ -2386,7 +2302,6 @@ async function executeModTool(
           : error instanceof Error
             ? error.message
             : String(error),
-        options.scopedAgentId,
         redactions,
       );
 
@@ -2673,32 +2588,37 @@ async function executeToolInner(
     try {
       // Inject options for tools that support them without altering schemas
       let enhancedArgs = args;
+      let invocationSecrets: Record<string, string> = {};
+
+      // Every built-in may opt into turn cancellation without adding another
+      // manager-side allowlist entry. The signal remains outside tool schemas.
+      if (options?.signal) {
+        enhancedArgs = { ...enhancedArgs, signal: options.signal };
+      }
 
       if (STREAMING_SHELL_TOOLS.has(internalName)) {
-        if (options?.signal) {
-          enhancedArgs = { ...enhancedArgs, signal: options.signal };
-        }
-        if (options?.onOutput) {
-          enhancedArgs = {
-            ...enhancedArgs,
-            onOutput: (chunk: string, stream: "stdout" | "stderr") => {
-              options.onOutput?.(
-                stripAnsi(scrubSecretsFromString(chunk, scopedAgentId)),
-                stream,
-              );
-            },
-          };
-        }
-        // Keep secret values out of shell interpolation.
+        // Keep secret values out of shell interpolation and only redact values
+        // that this invocation can access.
         const command = enhancedArgs.command ?? enhancedArgs.cmd;
-        const secretEnv =
+        invocationSecrets =
           typeof command === "string" ||
           (Array.isArray(command) &&
             command.every((part) => typeof part === "string"))
             ? extractSecretEnvFromCommand(command, scopedAgentId)
             : {};
-        if (Object.keys(secretEnv).length > 0) {
-          enhancedArgs = { ...enhancedArgs, secretEnv };
+        if (options?.onOutput) {
+          enhancedArgs = {
+            ...enhancedArgs,
+            onOutput: (chunk: string, stream: "stdout" | "stderr") => {
+              options.onOutput?.(
+                stripAnsi(scrubSecretsFromString(chunk, invocationSecrets)),
+                stream,
+              );
+            },
+          };
+        }
+        if (Object.keys(invocationSecrets).length > 0) {
+          enhancedArgs = { ...enhancedArgs, secretEnv: invocationSecrets };
         }
         if (options?.parentScope) {
           enhancedArgs = { ...enhancedArgs, parentScope: options.parentScope };
@@ -2709,9 +2629,6 @@ async function executeToolInner(
       if (internalName === "Task") {
         if (options?.toolCallId) {
           enhancedArgs = { ...enhancedArgs, toolCallId: options.toolCallId };
-        }
-        if (options?.signal) {
-          enhancedArgs = { ...enhancedArgs, signal: options.signal };
         }
         if (options?.parentScope) {
           enhancedArgs = { ...enhancedArgs, parentScope: options.parentScope };
@@ -2728,15 +2645,14 @@ async function executeToolInner(
         enhancedArgs = { ...enhancedArgs, parentScope: options.parentScope };
       }
 
-      // Inject the execution context id for tools that need to mutate
-      // turn-scoped execution state without touching global singletons.
-      if (
-        WORKTREE_TOOL_NAMES.has(internalName as ToolName) &&
-        options?.toolContextId
-      ) {
+      // Inject worktree-only execution state and cancellation without exposing
+      // either internal field in the model-facing schema.
+      if (WORKTREE_TOOL_NAMES.has(internalName as ToolName)) {
         enhancedArgs = {
           ...enhancedArgs,
-          _executionContextId: options.toolContextId,
+          ...(options?.toolContextId && {
+            _executionContextId: options.toolContextId,
+          }),
         };
       }
 
@@ -2779,7 +2695,7 @@ async function executeToolInner(
       // don't leak into agent context or render as garbage in downstream UIs.
       if (STREAMING_SHELL_TOOLS.has(internalName)) {
         const sanitize = (text: string) =>
-          stripAnsi(scrubSecretsFromString(text, scopedAgentId));
+          stripAnsi(scrubSecretsFromString(text, invocationSecrets));
         if (typeof flattenedResponse === "string") {
           flattenedResponse = sanitize(flattenedResponse);
         } else if (Array.isArray(flattenedResponse)) {

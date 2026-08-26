@@ -3,6 +3,7 @@ import { createSlackMessageActionAdapter } from "@/channels-slack";
 import {
   buildMessageChannelExternalToolDefinition,
   executeMessageChannel,
+  executeMessageChannelExternalTool,
   type MessageChannelExecutionResolver,
 } from "@/gateway-core";
 import type { ChannelMessageActionTransport } from "./plugin-types";
@@ -29,6 +30,12 @@ describe("external MessageChannel gateway boundary", () => {
     expect(definition.label).toBe("Message Channel");
     expect(definition.description).toContain(
       "Plain assistant text is not delivered to that external user.",
+    );
+    expect(definition.description).toContain(
+      "After that final send succeeds, do not repeat or paraphrase the sent message in assistant text; finish with only `Sent.` as the internal confirmation.",
+    );
+    expect(definition.description).toContain(
+      "This does not apply to a short acknowledgement sent before continuing substantive work.",
     );
     expect(definition.description).toContain(
       "Replies to routed Slack threads stay in the current thread automatically.",
@@ -130,6 +137,115 @@ describe("external MessageChannel gateway boundary", () => {
       parseMode: undefined,
       agentId: "agent-1",
       conversationId: "conv-1",
+    });
+
+    const externalResult = await executeMessageChannelExternalTool(
+      externalToolInput,
+      {
+        resolver,
+        scope: { agentId: "agent-1", conversationId: "conv-1" },
+        channelTurnSources: [
+          {
+            channel: "slack",
+            accountId: "generated-app-1",
+            chatId: "C123",
+            chatType: "channel",
+            messageId: "1712800000.000100",
+            threadId: null,
+            agentId: "agent-1",
+            conversationId: "conv-1",
+          },
+        ],
+      },
+    );
+    expect(externalResult).toEqual({
+      content: [
+        {
+          type: "text",
+          text: "Message sent to slack (message_id: slack-response-1)",
+        },
+      ],
+      is_error: false,
+    });
+  });
+
+  test("returns canonical external-tool validation and routing errors", async () => {
+    const resolver: MessageChannelExecutionResolver = {
+      isSupportedChannel: (channel) => channel === "slack",
+      resolveRoutedContext: () => null,
+    };
+    const options = {
+      resolver,
+      scope: { agentId: "agent-1", conversationId: "conv-1" },
+    };
+
+    const validationError = await executeMessageChannelExternalTool(
+      { action: "send", channel: "slack", message: "missing destination" },
+      options,
+    );
+    expect(validationError).toEqual({
+      content: [
+        {
+          type: "text",
+          text: "Error: MessageChannel requires exactly one of chat_id or target.",
+        },
+      ],
+      is_error: true,
+    });
+
+    const noRoute = await executeMessageChannelExternalTool(
+      {
+        action: "send",
+        channel: "slack",
+        chat_id: "C123",
+        message: "hello",
+      },
+      options,
+    );
+    expect(noRoute.is_error).toBe(true);
+    expect(noRoute.content[0]?.text).toStartWith("Error: No route");
+  });
+
+  test("marks transport failures as external-tool errors", async () => {
+    const resolver: MessageChannelExecutionResolver = {
+      isSupportedChannel: (channel) => channel === "slack",
+      resolveRoutedContext: () => ({
+        route: {
+          accountId: "generated-app-1",
+          chatId: "C123",
+          agentId: "agent-1",
+          conversationId: "conv-1",
+        },
+        transport: {
+          sendMessage: async () => {
+            throw new Error("Slack unavailable");
+          },
+        },
+        messageActions: createSlackActions(),
+      }),
+    };
+
+    const result = await executeMessageChannelExternalTool(
+      {
+        action: "send",
+        channel: "slack",
+        chat_id: "C123",
+        message: "hello",
+      },
+      {
+        resolver,
+        scope: { agentId: "agent-1", conversationId: "conv-1" },
+      },
+    );
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: "text",
+          text: "Error: Sending message to slack failed: Slack unavailable",
+        },
+      ],
+      is_error: true,
     });
   });
 

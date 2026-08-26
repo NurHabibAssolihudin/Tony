@@ -80,9 +80,9 @@ import {
 import { consumeQueuedTurn, scheduleQueuePump } from "./queue";
 import {
   getApprovalToolCallDesyncErrorText,
-  recoverApprovalStateForSync,
   shouldAttemptPostStopApprovalRecovery,
 } from "./recovery";
+import { recoverApprovalStateForSync } from "./recovery-sync";
 import {
   clearRecoveredApprovalStateForScope,
   getListenerStatus,
@@ -122,6 +122,7 @@ function createLegacyTestRuntime(): ConversationRuntime & {
   connectionId: string | null;
   connectionName: string | null;
   sessionId: string;
+  nextConnectionAttempt: number;
   nextConnectionOrdinal: number;
   connections: ListenerRuntime["connections"];
   connectionIdsByRuntimeKey: ListenerRuntime["connectionIdsByRuntimeKey"];
@@ -173,6 +174,7 @@ function createLegacyTestRuntime(): ConversationRuntime & {
     connectionId: string | null;
     connectionName: string | null;
     sessionId: string;
+    nextConnectionAttempt: number;
     nextConnectionOrdinal: number;
     connections: ListenerRuntime["connections"];
     connectionIdsByRuntimeKey: ListenerRuntime["connectionIdsByRuntimeKey"];
@@ -280,6 +282,12 @@ function createLegacyTestRuntime(): ConversationRuntime & {
       get: () => listener.sessionId,
       set: (value: string) => {
         listener.sessionId = value;
+      },
+    },
+    nextConnectionAttempt: {
+      get: () => listener.nextConnectionAttempt,
+      set: (value: number) => {
+        listener.nextConnectionAttempt = value;
       },
     },
     nextConnectionOrdinal: {
@@ -651,16 +659,16 @@ export const __listenClientTestUtils = {
   replaySyncStateForRuntime: (
     runtime: ListenerRuntime,
     socket: WebSocket,
-    scope: { agent_id: string; conversation_id: string },
+    scope: { agent_id: string | null; conversation_id: string },
     opts?: {
       recoverApprovals?: boolean;
       recoverApprovalStateForSync?: (
         runtime: ConversationRuntime,
-        scope: { agent_id: string; conversation_id: string },
+        scope: { agent_id: string | null; conversation_id: string },
       ) => Promise<void>;
       scheduleWarmupsAfterSync?: (
         runtime: ListenerRuntime,
-        scope: { agent_id: string; conversation_id: string },
+        scope: { agent_id: string | null; conversation_id: string },
       ) => void;
       forceDeviceStatus?: boolean;
     },

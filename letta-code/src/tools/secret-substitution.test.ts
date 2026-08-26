@@ -56,6 +56,35 @@ describe("scoped secret helpers", () => {
     );
   });
 
+  test("extracts env vars from braced shell references", async () => {
+    await seedSecret(AGENT_A, SECRET_A);
+
+    const expected = { [SECRET_KEY]: SECRET_A };
+    expect(
+      extractSecretEnvFromCommand(`echo "\${${SECRET_KEY}}"`, AGENT_A),
+    ).toEqual(expected);
+    expect(
+      extractSecretEnvFromCommand(`[ -z "\${${SECRET_KEY}:-}" ]`, AGENT_A),
+    ).toEqual(expected);
+    expect(
+      extractSecretEnvFromCommand(`echo "\${#${SECRET_KEY}}"`, AGENT_A),
+    ).toEqual(expected);
+    expect(
+      extractSecretEnvFromCommand(`echo "\${!${SECRET_KEY}}"`, AGENT_A),
+    ).toEqual(expected);
+  });
+
+  test("ignores text without a secret reference", async () => {
+    await seedSecret(AGENT_A, SECRET_A);
+
+    expect(
+      extractSecretEnvFromCommand(`printenv ${SECRET_KEY}`, AGENT_A),
+    ).toEqual({});
+    expect(extractSecretEnvFromCommand(`echo \${lowercase}`, AGENT_A)).toEqual(
+      {},
+    );
+  });
+
   test("extracts env vars from command arrays", async () => {
     await seedSecret(AGENT_A, SECRET_A);
 
@@ -73,10 +102,12 @@ describe("scoped secret helpers", () => {
     await seedSecret(AGENT_A, SECRET_A);
     await seedSecret(AGENT_B, SECRET_B);
 
-    expect(scrubSecretsFromString(SECRET_A, AGENT_A)).toBe(
+    expect(scrubSecretsFromString(SECRET_A, { [SECRET_KEY]: SECRET_A })).toBe(
       `${SECRET_KEY}=<REDACTED>`,
     );
-    expect(scrubSecretsFromString(SECRET_B, AGENT_A)).toBe(SECRET_B);
+    expect(scrubSecretsFromString(SECRET_B, { [SECRET_KEY]: SECRET_A })).toBe(
+      SECRET_B,
+    );
   });
 });
 

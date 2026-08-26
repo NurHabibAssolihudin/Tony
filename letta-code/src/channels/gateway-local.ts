@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { getModelInfo } from "@/agent/model";
 import { createAppServerClient } from "@/app-server-client";
 import { settingsManager } from "@/settings-manager";
-import { message_channel } from "@/tools/impl/message-channel";
+import { executeLocalMessageChannelExternalTool } from "@/tools/impl/message-channel";
 import type {
   ExecuteCommandResponseMessage,
   ListModelsResponseMessage,
@@ -18,15 +18,20 @@ import type {
 } from "@/types/service-protocol";
 import { createChannelRichDraftStreamer } from "./channel-rich-draft-streamer";
 import {
+  type RuntimeCommandClient,
+  runChannelCancelCommand,
+  runChannelModelListCommand,
+  runChannelModelUpdateCommand,
+  runChannelReflectionCommand,
+  runChannelReloadCommand,
+} from "./command-runtime-executor";
+import {
   buildChannelCurrentModelMessage,
   buildChannelCurrentModelUnavailableMessage,
-  buildChannelModelListMessage,
-  buildChannelModelListUnavailableMessage,
-  buildChannelModelUpdatedMessage,
-  buildChannelModelUpdateFailedMessage,
 } from "./commands";
 import { ChannelGateway, type ChannelGatewayDelivery } from "./gateway-core";
 import { buildGatewayMessageChannelTool } from "./message-channel-gateway-tool";
+import { getChannelDisplayName } from "./plugin-registry";
 import {
   type ChannelsCommand,
   handleChannelsProtocolCommand,
@@ -93,7 +98,10 @@ async function executeChannelServiceCommand(
 }
 
 async function executeGatewayServiceCommand(
-  request: ServiceCommandRequest,
+  request: Exclude<
+    ServiceCommandRequest,
+    { kind: "publish_runtime_tools" | "release_runtime_tools" }
+  >,
 ): Promise<ServiceCommandResponse> {
   if (request.kind === "protocol") {
     return {
@@ -136,6 +144,14 @@ function gatewayClientMessageId(delivery: {
     .digest("hex")
     .slice(0, 32);
   return `cm-channel-${digest}`;
+}
+
+function channelDisplayName(channelId: string): string {
+  try {
+    return getChannelDisplayName(channelId);
+  } catch {
+    return channelId;
+  }
 }
 
 function isListModelsResponse(
@@ -228,19 +244,17 @@ export async function startLocalChannelGateway(
           }
         : null;
     },
-    buildExternalTool: async (runtime) => {
-      return buildGatewayMessageChannelTool(
-        registry.resolveTurnSourcesForScope(
-          runtime.agent_id,
-          runtime.conversation_id,
-        ),
-      );
+    buildExternalTool: async (runtime, sources) => {
+      return buildGatewayMessageChannelTool(sources, runtime);
     },
     executeExternalTool: async (request, sources, idempotencyScope) => {
-      if (request.tool_name !== "MessageChannel" || !request.runtime) {
+      if (
+        request.tool_name !== "MessageChannel" ||
+        !request.runtime?.agent_id
+      ) {
         throw new Error(`Unsupported gateway tool: ${request.tool_name}`);
       }
-      const text = await message_channel(
+      return await executeLocalMessageChannelExternalTool(
         {
           ...request.input,
           channel: String(request.input.channel ?? ""),
@@ -253,10 +267,6 @@ export async function startLocalChannelGateway(
         },
         idempotencyScope,
       );
-      return {
-        content: [{ type: "text", text }],
-        is_error: text.startsWith("Error:"),
-      };
     },
     onLifecycle: (event) => registry.dispatchTurnLifecycleEvent(event),
     onProgress: (event) => registry.dispatchTurnProgressEvent(event),
@@ -438,9 +448,86 @@ export async function startLocalChannelGateway(
     routedRuntimeRegistrationRefresher.requestRefresh();
   });
 
+  const executeRemoteCommand = (
+    runtime: RuntimeScope,
+    commandId: "reload" | "reflect",
+  ): Promise<ExecuteCommandResponseMessage> =>
+    client.request<ExecuteCommandResponseMessage>(
+      {
+        type: "execute_command",
+        request_id: client.nextRequestId(`channel-${commandId}`),
+        runtime,
+        command_id: commandId,
+      },
+      { predicate: isExecuteCommandResponse },
+    );
+
+  // In-process transport for the shared runtime-command executor: the same
+  // command semantics Letta Cloud reaches over its listener relay, backed
+  // here by the direct App Server connection. Local-only side effects
+  // (recent-model tracking, gateway model-status cache) stay in this client.
+  const runtimeCommandClient: RuntimeCommandClient = {
+    listModels: async () => {
+      const response = await client.request<ListModelsResponseMessage>(
+        {
+          type: "list_models",
+          request_id: client.nextRequestId("channel-model-list"),
+        },
+        { predicate: isListModelsResponse },
+      );
+      return {
+        success: response.success,
+        entries: response.entries,
+        availableHandles: response.available_handles,
+        error: response.error,
+      };
+    },
+    updateModel: async ({ runtime, modelIdentifier }) => {
+      const response = await client.request<UpdateModelResponseMessage>(
+        {
+          type: "update_model",
+          request_id: client.nextRequestId("channel-model-update"),
+          runtime,
+          payload: {
+            model_id: modelIdentifier,
+            model_handle: modelIdentifier,
+          },
+        },
+        { predicate: isUpdateModelResponse },
+      );
+      if (!response.success) {
+        return { success: false, error: response.error };
+      }
+      settingsManager.addRecentModel(response.model_handle ?? modelIdentifier);
+      gateway.updateModelStatus(
+        runtime,
+        response.model_handle ?? modelIdentifier,
+      );
+      return {
+        success: true,
+        modelHandle: response.model_handle,
+        appliedTo: response.applied_to,
+      };
+    },
+    abortMessage: async ({ runtime, runId }) => {
+      const response = await client.abort({ runtime, run_id: runId });
+      return { success: response.success, aborted: response.aborted };
+    },
+    executeCommand: async ({ runtime, commandId }) => {
+      const response =
+        commandId === "reflect"
+          ? await executeRemoteCommand(runtime, "reflect")
+          : await executeRemoteCommand(runtime, "reload");
+      return { success: response.success, output: response.output };
+    },
+  };
+
   registry.setCancelHandler(async ({ runtime }) => {
-    const response = await client.abort({ runtime, run_id: null });
-    return response.success && response.aborted;
+    const result = await runChannelCancelCommand({
+      client: runtimeCommandClient,
+      runtime,
+    });
+    return result.cancelled;
   });
 
   registry.setModelHandler(async ({ channelId, runtime, modelIdentifier }) => {
@@ -498,95 +585,56 @@ export async function startLocalChannelGateway(
     }
 
     if (modelIdentifier.toLowerCase() === "list") {
-      const response = await client.request<ListModelsResponseMessage>(
-        {
-          type: "list_models",
-          request_id: client.nextRequestId("channel-model-list"),
-        },
-        { predicate: isListModelsResponse },
-      );
-      return {
-        handled: true,
-        text: response.success
-          ? buildChannelModelListMessage(channelId, {
-              entries: response.entries,
-              availableHandles: response.available_handles,
-              recentHandles: settingsManager.getRecentModels(),
-            })
-          : buildChannelModelListUnavailableMessage(
-              channelId,
-              response.error ?? "Failed to list models",
-            ),
-      };
+      return runChannelModelListCommand({
+        channelId,
+        client: runtimeCommandClient,
+        recentHandles: settingsManager.getRecentModels(),
+        channelDisplayName,
+      });
     }
 
-    const response = await client.request<UpdateModelResponseMessage>(
-      {
-        type: "update_model",
-        request_id: client.nextRequestId("channel-model-update"),
-        runtime,
-        payload: {
-          model_id: modelIdentifier,
-          model_handle: modelIdentifier,
-        },
-      },
-      { predicate: isUpdateModelResponse },
-    );
-    if (!response.success) {
-      return {
-        handled: true,
-        text: buildChannelModelUpdateFailedMessage(
-          channelId,
-          modelIdentifier,
-          response.error ?? "Failed to update model",
-        ),
-      };
-    }
-    settingsManager.addRecentModel(response.model_handle ?? modelIdentifier);
-    gateway.updateModelStatus(
+    return runChannelModelUpdateCommand({
+      channelId,
+      client: runtimeCommandClient,
       runtime,
-      response.model_handle ?? modelIdentifier,
-    );
-    return {
-      handled: true,
-      text: buildChannelModelUpdatedMessage(channelId, {
-        modelLabel:
-          getModelInfo(response.model_handle ?? modelIdentifier)?.label ??
-          modelIdentifier,
-        modelHandle: response.model_handle ?? modelIdentifier,
-        appliedTo: response.applied_to,
-      }),
-    };
+      modelIdentifier,
+      resolveModelLabel: (modelHandle) => getModelInfo(modelHandle)?.label,
+      channelDisplayName,
+    });
   });
 
-  const executeRemoteCommand = (
-    runtime: RuntimeScope,
-    commandId: "reload" | "reflect",
-  ): Promise<ExecuteCommandResponseMessage> =>
-    client.request<ExecuteCommandResponseMessage>(
-      {
-        type: "execute_command",
-        request_id: client.nextRequestId(`channel-${commandId}`),
-        runtime,
-        command_id: commandId,
-      },
-      { predicate: isExecuteCommandResponse },
-    );
-  registry.setReloadHandler(async ({ runtime }) => {
-    const response = await executeRemoteCommand(runtime, "reload");
-    return { handled: true, text: response.output };
-  });
-  registry.setReflectionHandler(async ({ runtime }) => {
-    const response = await executeRemoteCommand(runtime, "reflect");
-    return { handled: true, text: response.output };
-  });
+  registry.setReloadHandler(async ({ runtime }) =>
+    runChannelReloadCommand({ client: runtimeCommandClient, runtime }),
+  );
+  registry.setReflectionHandler(async ({ runtime }) =>
+    runChannelReflectionCommand({ client: runtimeCommandClient, runtime }),
+  );
 
   registry.setReady();
   return {
     executeCommand: async (command) => {
-      let result: Awaited<ReturnType<typeof executeGatewayServiceCommand>>;
+      let result: ServiceCommandResponse;
       try {
-        result = await executeGatewayServiceCommand(command);
+        if (command.kind === "publish_runtime_tools") {
+          const sources = registry.resolveTurnSourcesForScope(
+            command.runtime.agent_id,
+            command.runtime.conversation_id,
+          );
+          const transient = await gateway.publishRuntimeTools(
+            command.runtime,
+            sources,
+          );
+          result = { kind: "runtime_tools_published", transient };
+        } else if (command.kind === "release_runtime_tools") {
+          const sources = registry.resolveTurnSourcesForScope(
+            command.runtime.agent_id,
+            command.runtime.conversation_id,
+          );
+          await gateway.releaseRuntimeTools(command.runtime, sources);
+          result = { kind: "runtime_tools_released" };
+        } else {
+          result = await executeGatewayServiceCommand(command);
+        }
       } catch (error) {
         routedRuntimeRegistrationRefresher.requestRefresh();
         throw error;

@@ -2,6 +2,11 @@ import type { Stream } from "@letta-ai/letta-client/core/streaming";
 import type { LettaStreamingResponse } from "@letta-ai/letta-client/resources/agents/messages";
 import type { ApprovalResult } from "@/agent/approval-execution";
 import { fetchRunErrorInfo } from "@/agent/approval-recovery";
+import {
+  CHATGPT_PLAN_ROTATION_MAX_SWAPS_PER_TURN,
+  formatPlanRotationNotice,
+  rotateChatGPTPlanOnQuotaLimit,
+} from "@/agent/chatgpt-plan-rotation";
 import { getResumeDataFromBackend } from "@/agent/check-approval";
 import {
   getStreamToolContextId,
@@ -21,6 +26,7 @@ import {
 } from "@/cli/helpers/accumulator";
 import { getRetryStatusMessage } from "@/cli/helpers/error-formatter";
 import { drainStreamWithResume } from "@/cli/helpers/stream";
+import type { ErrorInfo } from "@/cli/helpers/stream-processor";
 import { telemetry } from "@/telemetry";
 import { trackBoundaryError } from "@/telemetry/error-reporting";
 import type { StopReasonType, StreamDelta } from "@/types/protocol_v2";
@@ -29,7 +35,6 @@ import { normalizeCloudRetryWireMessage } from "./cloud-retry-message";
 import {
   EMPTY_RESPONSE_MAX_RETRIES,
   LLM_API_ERROR_MAX_RETRIES,
-  PROVIDER_FALLBACK_NOTICE,
 } from "./constants";
 import { getConversationWorkingDirectory } from "./cwd";
 import {
@@ -45,12 +50,7 @@ import {
   emitLoopStatusUpdate,
   emitRetryDelta,
   emitRuntimeStateUpdates,
-  emitStatusDelta,
 } from "./protocol-outbound";
-import {
-  createProviderFallbackState,
-  maybeApplyProviderFallback,
-} from "./provider-fallback";
 import {
   emitLoopErrorNotice,
   emitRecoverableRetryNotice,
@@ -71,11 +71,17 @@ import {
 import { normalizeCwdAgentId } from "./scope";
 import { markAwaitingAcceptedApprovalContinuationRunId } from "./send";
 import { injectQueuedSkillContent } from "./skill-injection";
+import { emitStreamRecoveryStatusDeltas } from "./stream-recovery-status";
+import * as tp from "./teleport";
 import type { ListenerTransport } from "./transport";
 import { handleApprovalStop } from "./turn-approval";
 import { runListenerTurnCleanup } from "./turn-cleanup";
 import { completeSuccessfulListenerTurn } from "./turn-completion";
 import { releaseListenerTurnContext } from "./turn-context";
+import {
+  createTurnCorrelation,
+  type TurnCorrelation,
+} from "./turn-correlation";
 import {
   rebuildTurnInputWithFreshDenials,
   refreshTurnInputOtidsForNewRequest,
@@ -101,6 +107,7 @@ export async function handleIncomingMessage(
   connectionId?: string,
   dequeuedBatchId: string = `batch-direct-${crypto.randomUUID()}`,
   existingTurnLease?: TurnLease,
+  existingTurnCorrelation?: TurnCorrelation,
 ): Promise<void> {
   // Notify OTID-keyed observers around the complete turn.
   notifyTurnStarted(msg);
@@ -113,9 +120,11 @@ export async function handleIncomingMessage(
       connectionId,
       dequeuedBatchId,
       existingTurnLease,
+      existingTurnCorrelation,
     );
   } finally {
     notifyTurnFinished(msg);
+    tp.finishPendingTeleport(runtime);
   }
 }
 
@@ -130,34 +139,36 @@ async function handleIncomingMessageInner(
   connectionId?: string,
   dequeuedBatchId: string = `batch-direct-${crypto.randomUUID()}`,
   existingTurnLease?: TurnLease,
+  existingTurnCorrelation?: TurnCorrelation,
 ): Promise<void> {
-  const agentId = msg.agentId;
+  const agentId = normalizeCwdAgentId(msg.agentId);
   const requestedConversationId = msg.conversationId || undefined;
   const conversationId = requestedConversationId ?? "default";
-  const normalizedAgentId = normalizeCwdAgentId(agentId);
   const turnWorkingDirectory = getConversationWorkingDirectory(
     runtime.listener,
-    normalizedAgentId,
+    agentId,
     conversationId,
   );
 
   const turnPermissionModeState = getOrCreateConversationPermissionModeStateRef(
     runtime.listener,
-    normalizedAgentId,
+    agentId,
     conversationId,
   );
 
+  let postStopApprovalRecoveryRetries = 0,
+    llmApiErrorRetries = 0,
+    emptyResponseRetries = 0,
+    chatgptPlanSwaps = 0,
+    lastApprovalContinuationAccepted = false,
+    activeDequeuedBatchId = dequeuedBatchId;
+  const turnCorrelation =
+    existingTurnCorrelation ??
+    createTurnCorrelation(runtime, msg, activeDequeuedBatchId);
   const msgRunIds: string[] = [];
-  let postStopApprovalRecoveryRetries = 0;
-  let llmApiErrorRetries = 0;
-  let emptyResponseRetries = 0;
-  let lastApprovalContinuationAccepted = false;
-  let activeDequeuedBatchId = dequeuedBatchId;
-
   let lastExecutionResults: ApprovalResult[] | null = null;
   let lastExecutingToolCallIds: string[] = [];
   let lastNeedsUserInputToolCallIds: string[] = [];
-
   const turnLease =
     existingTurnLease ??
     runtime.turnLifecycle.begin({
@@ -167,17 +178,14 @@ async function handleIncomingMessageInner(
   if (connectionId) {
     runtime.activeConnectionId = connectionId;
   }
-  if (!runtime.turnLifecycle.isCurrent(turnLease)) {
+  if (!runtime.turnLifecycle.isCurrent(turnLease))
     throw new Error("Cannot continue a turn with a stale lifecycle lease");
-  }
   const turnAbortSignal = turnLease.signal;
   let finalizedByThisInvocation = false;
   const noteFinalization = (
     transition: ReturnType<typeof finishListenerTurn>,
   ) => {
-    if (transition.finished) {
-      finalizedByThisInvocation = true;
-    }
+    finalizedByThisInvocation ||= transition.finished;
     return transition;
   };
   const finishTurn = (options: Parameters<typeof finishListenerTurn>[2]) =>
@@ -220,14 +228,6 @@ async function handleIncomingMessageInner(
       conversation_id: conversationId,
     });
     telemetry.setCurrentAgentId(agentId ?? null);
-    if (!agentId) {
-      finishTurn({
-        stopReason: "error",
-        conversationId,
-        error: getSafeTerminalError({ message: "Missing agent ID" }),
-      });
-      return;
-    }
     let turnToolContextId: string | null = null;
     const setup = await prepareListenerTurn({
       msg,
@@ -273,15 +273,12 @@ async function handleIncomingMessageInner(
     }
     let turnInput = setup.turnInput;
     const inboundUserTranscriptLines = setup.inboundUserTranscriptLines;
-    const providerFallback = createProviderFallbackState(
-      setup.getCachedAgent(),
-      setup.overrideModel,
-    );
+    const overrideModel = setup.overrideModel;
     let pendingNormalizationInterruptedToolCallIds =
       setup.pendingNormalizationInterruptedToolCallIds;
     const preparedToolContext = setup.preparedToolContext;
     const buildSendOptions = (): Parameters<typeof sendMessageStream>[2] => ({
-      agentId,
+      ...(agentId ? { agentId } : {}),
       streamTokens: true,
       background: true,
       workingDirectory: turnWorkingDirectory,
@@ -296,9 +293,7 @@ async function handleIncomingMessageInner(
               turnInput.imageFailureModesByMessageOtid,
           }
         : {}),
-      ...(providerFallback.overrideModel
-        ? { overrideModel: providerFallback.overrideModel }
-        : {}),
+      ...(overrideModel ? { overrideModel } : {}),
       ...(msg.actingUserId ? { actingUserId: msg.actingUserId } : {}),
       ...(pendingNormalizationInterruptedToolCallIds.length > 0
         ? {
@@ -316,14 +311,13 @@ async function handleIncomingMessageInner(
       socket,
       runtime,
       turnLease,
-      providerFallback,
       buildSendOptions,
       onTerminal: noteFinalization,
       getTurnId: () => activeDequeuedBatchId,
     });
-
     const currentInputWithSkillContent = injectQueuedSkillContent(
       turnInput.messages,
+      { socket, runtime, agentId, conversationId },
     );
     const initialSendResult = await turnInputSender.send(
       currentInputWithSkillContent,
@@ -353,12 +347,11 @@ async function handleIncomingMessageInner(
     );
     let runIdSent = false;
     let runId: string | undefined;
-    const buffers = createBuffers(agentId);
+    const buffers = createBuffers(agentId ?? undefined);
     seedInboundUserTranscriptLines(buffers, inboundUserTranscriptLines);
-
     while (true) {
       runIdSent = false;
-      let latestErrorText: string | null = null;
+      const latestErrorInfoRef = { current: null as ErrorInfo | null };
       const result = await drainStreamWithResume(
         stream as Stream<LettaStreamingResponse>,
         buffers,
@@ -373,6 +366,7 @@ async function handleIncomingMessageInner(
           if (typeof maybeRunId === "string") {
             runId = maybeRunId;
             runtime.turnLifecycle.setRunId(turnLease, maybeRunId);
+            turnCorrelation.observeRun(maybeRunId);
             if (!runIdSent) {
               runIdSent = true;
               msgRunIds.push(maybeRunId);
@@ -382,15 +376,12 @@ async function handleIncomingMessageInner(
               });
             }
           }
-
           if (errorInfo) {
             const recoverableApprovalErrorText =
               getApprovalToolCallDesyncErrorText(errorInfo);
-            latestErrorText =
-              recoverableApprovalErrorText ||
-              errorInfo.detail ||
-              errorInfo.message ||
-              latestErrorText;
+            latestErrorInfoRef.current = recoverableApprovalErrorText
+              ? { ...errorInfo, detail: recoverableApprovalErrorText }
+              : errorInfo;
             if (!recoverableApprovalErrorText) {
               emitLoopErrorNotice(socket, runtime, {
                 message: errorInfo.message || "Stream error",
@@ -413,7 +404,6 @@ async function handleIncomingMessageInner(
               );
             }
           }
-
           if (shouldOutput) {
             const normalizedChunk =
               normalizeCloudRetryWireMessage(chunk) ??
@@ -445,22 +435,18 @@ async function handleIncomingMessageInner(
       const approvals = result.approvals || [];
       const fallbackError = result.fallbackError ?? null;
 
-      if (result.terminalEofGuardFired) {
-        emitStatusDelta(socket, runtime, {
-          message:
-            "Stream did not close after completing, continued without waiting",
-          level: "warning",
-          runId: runId || runtime.activeRunId,
-          agentId,
-          conversationId,
-        });
-      }
+      emitStreamRecoveryStatusDeltas(socket, runtime, {
+        terminalEofGuardFired: result.terminalEofGuardFired,
+        stallReconcilerFired: result.stallReconcilerFired,
+        runId: runId || runtime.activeRunId,
+        agentId,
+        conversationId,
+      });
 
       if (finishIfInterrupted(runId || runtime.activeRunId)) {
         break;
       }
       lastApprovalContinuationAccepted = false;
-
       if (stopReason === "end_turn") {
         const transcriptLines = toLines(buffers);
         const completion = await completeSuccessfulListenerTurn({
@@ -510,20 +496,23 @@ async function handleIncomingMessageInner(
         if (finishIfInterrupted(lastRunId || runtime.activeRunId)) {
           break;
         }
+        const latestErrorInfo = latestErrorInfoRef.current;
         const errorDetail =
-          latestErrorText ||
+          latestErrorInfo?.detail ||
+          latestErrorInfo?.message ||
           runErrorInfo?.detail ||
           runErrorInfo?.message ||
           fallbackError ||
           null;
-
+        const quotaError = latestErrorInfo ?? runErrorInfo ?? errorDetail;
         if (
           shouldAttemptPostStopApprovalRecovery({
             stopReason,
             runIdsSeen: msgRunIds.length,
             retries: postStopApprovalRecoveryRetries,
             runErrorDetail: errorDetail,
-            latestErrorText,
+            latestErrorText:
+              latestErrorInfo?.detail ?? latestErrorInfo?.message ?? null,
             fallbackError,
           })
         ) {
@@ -553,13 +542,13 @@ async function handleIncomingMessageInner(
           if (finishIfInterrupted(lastRunId || runtime.activeRunId)) {
             break;
           }
-
           setTurnLoopStatus(runtime, turnLease, "SENDING_API_REQUEST", {
             agent_id: agentId,
             conversation_id: conversationId,
           });
           const retryInputWithSkillContent = injectQueuedSkillContent(
             turnInput.messages,
+            { socket, runtime, agentId, conversationId },
           );
           const retrySendResult = await turnInputSender.send(
             retryInputWithSkillContent,
@@ -632,13 +621,13 @@ async function handleIncomingMessageInner(
             throw new Error("Cancelled by user");
           }
           turnInput = refreshTurnInputOtidsForNewRequest(turnInput);
-
           setTurnLoopStatus(runtime, turnLease, "SENDING_API_REQUEST", {
             agent_id: agentId,
             conversation_id: conversationId,
           });
           const retryInputWithSkillContent = injectQueuedSkillContent(
             turnInput.messages,
+            { socket, runtime, agentId, conversationId },
           );
           const retrySendResult = await turnInputSender.send(
             retryInputWithSkillContent,
@@ -668,6 +657,70 @@ async function handleIncomingMessageInner(
           continue;
         }
 
+        if (
+          agentId &&
+          chatgptPlanSwaps < CHATGPT_PLAN_ROTATION_MAX_SWAPS_PER_TURN
+        ) {
+          const rotation = await rotateChatGPTPlanOnQuotaLimit({
+            agentId,
+            currentHandle: null,
+            error: quotaError,
+          });
+          if (rotation) {
+            chatgptPlanSwaps += 1;
+            emitRecoverableRetryNotice(socket, runtime, {
+              kind: "transient_provider_retry",
+              message: formatPlanRotationNotice(rotation),
+              reason: "llm_api_error",
+              attempt: chatgptPlanSwaps,
+              maxAttempts: CHATGPT_PLAN_ROTATION_MAX_SWAPS_PER_TURN,
+              delayMs: 0,
+              runId: lastRunId || undefined,
+              agentId,
+              conversationId,
+            });
+
+            if (turnAbortSignal.aborted) {
+              throw new Error("Cancelled by user");
+            }
+            turnInput = refreshTurnInputOtidsForNewRequest(turnInput);
+            setTurnLoopStatus(runtime, turnLease, "SENDING_API_REQUEST", {
+              agent_id: agentId,
+              conversation_id: conversationId,
+            });
+            const retryInputWithSkillContent = injectQueuedSkillContent(
+              turnInput.messages,
+              { socket, runtime, agentId, conversationId },
+            );
+            const retrySendResult = await turnInputSender.send(
+              retryInputWithSkillContent,
+            );
+            turnInput = updateTurnInputMessagesPreservingOtids(
+              turnInput,
+              retryInputWithSkillContent,
+            );
+            const retryStream = turnInputSender.accept(retrySendResult);
+            if (!retryStream) {
+              return;
+            }
+            stream = retryStream;
+            pendingNormalizationInterruptedToolCallIds = [];
+            markAwaitingAcceptedApprovalContinuationRunId(
+              runtime,
+              turnLease,
+              turnInput.messages,
+            );
+            setTurnLoopStatus(runtime, turnLease, "PROCESSING_API_RESPONSE", {
+              agent_id: agentId,
+              conversation_id: conversationId,
+            });
+            turnToolContextId = getStreamToolContextId(
+              stream as Stream<LettaStreamingResponse>,
+            );
+            continue;
+          }
+        }
+
         const retriable = await isRetriablePostStopError(
           (stopReason as StopReasonType) || "error",
           lastRunId,
@@ -679,21 +732,14 @@ async function handleIncomingMessageInner(
         if (retriable && llmApiErrorRetries < LLM_API_ERROR_MAX_RETRIES) {
           llmApiErrorRetries += 1;
           const attempt = llmApiErrorRetries;
-          const fallbackHandle = maybeApplyProviderFallback(
-            providerFallback,
+          const delayMs = getRetryDelayMs({
+            category: "transient_provider",
             attempt,
-          );
-          const delayMs = fallbackHandle
-            ? 0
-            : getRetryDelayMs({
-                category: "transient_provider",
-                attempt,
-                detail: errorDetail,
-              });
-          const retryMessage = fallbackHandle
-            ? PROVIDER_FALLBACK_NOTICE
-            : getRetryStatusMessage(errorDetail) ||
-              `LLM API error encountered, retrying (attempt ${attempt}/${LLM_API_ERROR_MAX_RETRIES})...`;
+            detail: errorDetail,
+          });
+          const retryMessage =
+            getRetryStatusMessage(errorDetail) ||
+            `LLM API error encountered, retrying (attempt ${attempt}/${LLM_API_ERROR_MAX_RETRIES})...`;
           emitRecoverableRetryNotice(socket, runtime, {
             kind: "transient_provider_retry",
             message: retryMessage,
@@ -706,20 +752,18 @@ async function handleIncomingMessageInner(
             conversationId,
           });
 
-          if (!fallbackHandle) {
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-          }
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
           if (turnAbortSignal.aborted) {
             throw new Error("Cancelled by user");
           }
           turnInput = refreshTurnInputOtidsForNewRequest(turnInput);
-
           setTurnLoopStatus(runtime, turnLease, "SENDING_API_REQUEST", {
             agent_id: agentId,
             conversation_id: conversationId,
           });
           const retryInputWithSkillContent = injectQueuedSkillContent(
             turnInput.messages,
+            { socket, runtime, agentId, conversationId },
           );
           const retrySendResult = await turnInputSender.send(
             retryInputWithSkillContent,
@@ -800,7 +844,7 @@ async function handleIncomingMessageInner(
         approvals,
         runtime,
         socket,
-        agentId,
+        agentId: agentId ?? undefined,
         conversationId,
         turnWorkingDirectory,
         turnPermissionModeState,
@@ -811,9 +855,9 @@ async function handleIncomingMessageInner(
         pendingNormalizationInterruptedToolCallIds,
         turnToolContextId,
         turnLease,
+        turnCorrelation,
         processOwnedTurn: msg.processOwnedTurn === true,
         buildSendOptions,
-        providerFallback,
       });
       if (approvalResult.kind === "error") {
         const terminalRunId = runId || runtime.activeRunId;
@@ -852,6 +896,11 @@ async function handleIncomingMessageInner(
       lastApprovalContinuationAccepted =
         approvalResult.lastApprovalContinuationAccepted;
 
+      if (approvalResult.kind === "teleport") {
+        const pending = approvalResult.pendingTeleport;
+        noteFinalization(tp.finishTeleport(runtime, turnLease, pending));
+        return;
+      }
       if (approvalResult.kind === "interrupted") {
         if (runtime.turnLifecycle.isCurrent(turnLease)) {
           populateInterruptQueue(runtime, {
@@ -993,14 +1042,13 @@ async function handleIncomingMessageInner(
     }
 
     try {
-      if (finalizedByThisInvocation) {
-        await runListenerTurnCleanup({
-          runtime,
-          agentId,
-          normalizedAgentId,
-          conversationId,
-        });
-      }
+      await runListenerTurnCleanup({
+        runtime,
+        agentId,
+        normalizedAgentId: agentId,
+        conversationId,
+        finalized: finalizedByThisInvocation,
+      });
     } finally {
       releaseListenerTurnContext({ runtime, agentId, conversationId });
     }

@@ -38,6 +38,9 @@ function createIoDeps() {
       runChatGPTOAuthConnectFlow: mock(() =>
         Promise.resolve({ providerName: "chatgpt-plus-pro" }),
       ),
+      runCloudOAuthConnectFlow: mock(() =>
+        Promise.resolve({ providerName: "openrouter-oauth" }),
+      ),
       providerStorageTargetLabel: () => "test storage",
     },
   };
@@ -134,6 +137,27 @@ describe("connect subcommand", () => {
       expect.objectContaining({ providerName: "chatgpt-work" }),
     );
     expect(stdout.join("\n")).toContain("Provider 'chatgpt-work' saved.");
+  });
+
+  test("connects OpenRouter OAuth to the cloud provider store", async () => {
+    const { stdout, deps } = createIoDeps();
+
+    const exitCode = await runConnectSubcommand(["openrouter-oauth"], deps);
+
+    expect(exitCode).toBe(0);
+    expect(deps.ensureSettingsReady).toHaveBeenCalledTimes(1);
+    expect(deps.runCloudOAuthConnectFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "openrouter-oauth",
+        providerType: "openrouter",
+        providerName: "openrouter-oauth",
+        oauthProviderId: "openrouter",
+      }),
+      expect.objectContaining({ onStatus: expect.any(Function) }),
+    );
+    expect(stdout.join("\n")).toContain(
+      "Successfully connected to OpenRouter OAuth.",
+    );
   });
 
   test("connects API key provider from positional key", async () => {
@@ -271,6 +295,15 @@ describe("connect subcommand", () => {
     expect(deps.checkProviderApiKey).toHaveBeenCalledWith(
       "lmstudio_openai",
       "not-needed",
+      undefined,
+      undefined,
+      undefined,
+      {
+        connection: {
+          baseURL: "http://127.0.0.1:1234/v1",
+          timeout: 600_000,
+        },
+      },
     );
     expect(deps.createOrUpdateProvider).toHaveBeenCalledWith(
       "lmstudio_openai",
@@ -283,6 +316,35 @@ describe("connect subcommand", () => {
         baseURL: "http://127.0.0.1:1234/v1",
         timeout: 600_000,
       },
+    );
+  });
+
+  // Regression for #3381: the API key was validated against the provider's
+  // default endpoint because --base-url never reached checkProviderApiKey, so
+  // any third-party key failed with a 401 from api.openai.com.
+  test("validates the API key against the supplied base URL", async () => {
+    const { deps } = createIoDeps();
+    setProviderTarget("api");
+
+    const exitCode = await runConnectSubcommand(
+      [
+        "openai-compatible",
+        "--base-url",
+        "http://localhost:8080/v1",
+        "--api-key",
+        "third-party-key",
+      ],
+      deps,
+    );
+
+    expect(exitCode).toBe(0);
+    expect(deps.checkProviderApiKey).toHaveBeenCalledWith(
+      "openai",
+      "third-party-key",
+      undefined,
+      undefined,
+      undefined,
+      { connection: { baseURL: "http://localhost:8080/v1" } },
     );
   });
 
@@ -313,6 +375,10 @@ describe("connect subcommand", () => {
     expect(deps.checkProviderApiKey).toHaveBeenCalledWith(
       "openai-compatible",
       "not-needed",
+      undefined,
+      undefined,
+      undefined,
+      { connection: { baseURL: "http://127.0.0.1:8000/v1/" } },
     );
     expect(deps.createOrUpdateProvider).toHaveBeenCalledWith(
       "openai-compatible",
@@ -363,6 +429,10 @@ describe("connect subcommand", () => {
     expect(deps.checkProviderApiKey).toHaveBeenCalledWith(
       "lmstudio_openai",
       "1234",
+      undefined,
+      undefined,
+      undefined,
+      { connection: { baseURL: "http://localhost:8000/v1" } },
     );
     expect(deps.createOrUpdateProvider).toHaveBeenCalledWith(
       "lmstudio_openai",

@@ -12,6 +12,10 @@ export const LIMITS = {
   // Command output limits
   BASH_OUTPUT_CHARS: 30_000, // 30K characters for bash/shell output
   TASK_OUTPUT_CHARS: 30_000, // 30K characters for subagent task output
+  // Background shell completion notifications are injected into the agent's
+  // context unprompted, so they get a tighter budget than a tool return the
+  // agent actually asked for. The full transcript stays in the output file.
+  BASH_NOTIFICATION_CHARS: 10_000,
 
   // File reading limits
   READ_MAX_LINES: 2_000, // Max lines per file read
@@ -40,6 +44,8 @@ export interface TruncationOptions {
   toolName?: string;
   /** Whether to use middle truncation (keep beginning and end) */
   useMiddleTruncation?: boolean;
+  /** Secret values available to this tool invocation */
+  secrets?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -69,6 +75,7 @@ export function truncateByChars(
         text,
         options.workingDirectory,
         options.toolName ?? toolName,
+        options.secrets,
       );
     } catch (error) {
       // Silently fail if overflow file creation fails
@@ -172,6 +179,7 @@ export function truncateByLines(
         text,
         options.workingDirectory,
         options.toolName ?? toolName,
+        options.secrets,
       );
     } catch (error) {
       // Silently fail if overflow file creation fails
@@ -255,6 +263,7 @@ export function truncateArray<T>(
         fullContent,
         options.workingDirectory,
         options.toolName ?? toolName,
+        options.secrets,
       );
     } catch (error) {
       // Silently fail if overflow file creation fails

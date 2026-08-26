@@ -28,7 +28,6 @@ import {
 import {
   LLM_API_ERROR_MAX_RETRIES,
   MAX_PRE_STREAM_RECOVERY,
-  PROVIDER_FALLBACK_NOTICE,
 } from "./constants";
 import { appendQueuedTurnToInput } from "./continuation-input";
 import { getConversationWorkingDirectory } from "./cwd";
@@ -39,18 +38,17 @@ import {
 } from "./mod-adapter";
 import { getOrCreateConversationPermissionModeStateRef } from "./permission-mode";
 import { emitDequeuedUserMessage, emitRetryDelta } from "./protocol-outbound";
-import {
-  maybeApplyProviderFallback,
-  type ProviderFallbackState,
-} from "./provider-fallback";
 import { consumeQueuedTurn } from "./queue";
-import { emitRecoverableRetryNotice } from "./recoverable-notices";
 import {
   drainRecoveryStreamWithEmission,
   isApprovalToolCallDesyncError,
 } from "./recovery";
 import { injectQueuedSkillContent } from "./skill-injection";
 import type { ListenerTransport } from "./transport";
+import {
+  createTurnCorrelation,
+  type TurnCorrelation,
+} from "./turn-correlation";
 import { createTurnInputState } from "./turn-input-state";
 import type { TurnLease } from "./turn-lifecycle";
 import { setTurnLoopStatus } from "./turn-status";
@@ -290,6 +288,8 @@ export async function resolveStaleApprovals(
     getResumeData?: typeof getResumeDataFromBackend;
     retrieveAgent?: RetrieveAgent;
     prepareToolExecutionContext?: typeof prepareToolExecutionContextForScope;
+    sendApprovalContinuation?: typeof sendApprovalContinuationWithRetry;
+    drainRecoveryStream?: typeof drainRecoveryStreamWithEmission;
   } = {},
 ): Promise<Awaited<ReturnType<typeof drainRecoveryStreamWithEmission>> | null> {
   if (!runtime.agentId) return null;
@@ -297,6 +297,10 @@ export async function resolveStaleApprovals(
   const getResumeDataImpl = deps.getResumeData ?? getResumeDataFromBackend;
   const prepareToolExecutionContext =
     deps.prepareToolExecutionContext ?? prepareToolExecutionContextForScope;
+  const sendApprovalContinuation =
+    deps.sendApprovalContinuation ?? sendApprovalContinuationWithRetry;
+  const drainRecoveryStream =
+    deps.drainRecoveryStream ?? drainRecoveryStreamWithEmission;
   const assertCurrentTurnLease = () => {
     if (
       turnLease.signal.aborted ||
@@ -402,9 +406,17 @@ export async function resolveStaleApprovals(
           otid: crypto.randomUUID(),
         },
       ]);
+      let continuationActingUserId: string | undefined;
+      let recoveryTurnCorrelation: TurnCorrelation | undefined;
       const consumedQueuedTurn = consumeQueuedTurn(runtime);
       if (consumedQueuedTurn) {
         const { dequeuedBatch, queuedTurn } = consumedQueuedTurn;
+        recoveryTurnCorrelation = createTurnCorrelation(
+          runtime,
+          queuedTurn,
+          dequeuedBatch.batchId,
+        );
+        continuationActingUserId = queuedTurn.actingUserId;
         continuationInput = appendQueuedTurnToInput(
           continuationInput,
           queuedTurn,
@@ -414,14 +426,23 @@ export async function resolveStaleApprovals(
 
       const continuationMessagesWithSkillContent = injectQueuedSkillContent(
         continuationInput.messages,
+        {
+          socket,
+          runtime,
+          agentId: runtime.agentId,
+          conversationId: recoveryConversationId,
+        },
       );
-      const recoverySendResult = await sendApprovalContinuationWithRetry(
+      const recoverySendResult = await sendApprovalContinuation(
         recoveryConversationId,
         continuationMessagesWithSkillContent,
         {
           agentId: runtime.agentId ?? undefined,
           streamTokens: true,
           background: true,
+          ...(continuationActingUserId
+            ? { actingUserId: continuationActingUserId }
+            : {}),
           workingDirectory: recoveryWorkingDirectory,
           preparedToolContext: preparedToolContext.preparedToolContext,
           ...(continuationInput.imageFailureModesByMessageOtid
@@ -446,7 +467,7 @@ export async function resolveStaleApprovals(
 
       setTurnLoopStatus(runtime, turnLease, "PROCESSING_API_RESPONSE", scope);
 
-      const drainResult = await drainRecoveryStreamWithEmission(
+      const drainResult = await drainRecoveryStream(
         recoveryStream as Stream<LettaStreamingResponse>,
         socket,
         runtime,
@@ -454,6 +475,7 @@ export async function resolveStaleApprovals(
           agentId: runtime.agentId ?? undefined,
           conversationId: recoveryConversationId,
           turnLease,
+          turnCorrelation: recoveryTurnCorrelation,
         },
       );
       assertCurrentTurnLease();
@@ -484,16 +506,12 @@ export async function sendMessageStreamWithRetry(
   socket: ListenerTransport,
   runtime: ConversationRuntime,
   turnLease: TurnLease,
-  retryOptions: {
-    providerFallback?: ProviderFallbackState;
-  } = {},
 ): Promise<Awaited<ReturnType<typeof sendMessageStream>>> {
   const abortSignal = turnLease.signal;
   let transientRetries = 0;
   let conversationBusyRetries = 0;
   let preStreamRecoveryAttempts = 0;
   const MAX_CONVERSATION_BUSY_RETRIES = 3;
-  let currentOpts = opts;
   const retriedAfterBlockingRunSettled = new Set<string>();
 
   // eslint-disable-next-line no-constant-condition
@@ -510,7 +528,7 @@ export async function sendMessageStreamWithRetry(
       return await sendMessageStream(
         conversationId,
         messages,
-        currentOpts,
+        opts,
         abortSignal
           ? { maxRetries: 0, signal: abortSignal }
           : { maxRetries: 0 },
@@ -577,25 +595,6 @@ export async function sendMessageStreamWithRetry(
         });
         const attempt = transientRetries + 1;
         transientRetries = attempt;
-        const fallbackHandle = maybeApplyProviderFallback(
-          retryOptions.providerFallback,
-          attempt,
-        );
-        if (fallbackHandle) {
-          currentOpts = { ...currentOpts, overrideModel: fallbackHandle };
-          emitRecoverableRetryNotice(socket, runtime, {
-            kind: "transient_provider_retry",
-            message: PROVIDER_FALLBACK_NOTICE,
-            reason: "llm_api_error",
-            attempt,
-            maxAttempts: LLM_API_ERROR_MAX_RETRIES,
-            delayMs: 0,
-            agentId: runtime.agentId ?? undefined,
-            conversationId,
-          });
-          continue;
-        }
-
         const retryAfterMs =
           preStreamError instanceof APIError
             ? parseRetryAfterHeaderMs(
@@ -702,7 +701,6 @@ export async function sendApprovalContinuationWithRetry(
   turnLease: TurnLease,
   retryOptions: {
     allowApprovalRecovery?: boolean;
-    providerFallback?: ProviderFallbackState;
   } = {},
 ): Promise<ApprovalContinuationSendResult> {
   const abortSignal = turnLease.signal;
@@ -711,7 +709,6 @@ export async function sendApprovalContinuationWithRetry(
   let conversationBusyRetries = 0;
   let preStreamRecoveryAttempts = 0;
   const MAX_CONVERSATION_BUSY_RETRIES = 3;
-  let currentOpts = opts;
   const retriedAfterBlockingRunSettled = new Set<string>();
 
   // eslint-disable-next-line no-constant-condition
@@ -728,7 +725,7 @@ export async function sendApprovalContinuationWithRetry(
       const stream = await sendMessageStream(
         conversationId,
         messages,
-        currentOpts,
+        opts,
         abortSignal
           ? { maxRetries: 0, signal: abortSignal }
           : { maxRetries: 0 },
@@ -799,25 +796,6 @@ export async function sendApprovalContinuationWithRetry(
         });
         const attempt = transientRetries + 1;
         transientRetries = attempt;
-        const fallbackHandle = maybeApplyProviderFallback(
-          retryOptions.providerFallback,
-          attempt,
-        );
-        if (fallbackHandle) {
-          currentOpts = { ...currentOpts, overrideModel: fallbackHandle };
-          emitRecoverableRetryNotice(socket, runtime, {
-            kind: "transient_provider_retry",
-            message: PROVIDER_FALLBACK_NOTICE,
-            reason: "llm_api_error",
-            attempt,
-            maxAttempts: LLM_API_ERROR_MAX_RETRIES,
-            delayMs: 0,
-            agentId: runtime.agentId ?? undefined,
-            conversationId,
-          });
-          continue;
-        }
-
         const retryAfterMs =
           preStreamError instanceof APIError
             ? parseRetryAfterHeaderMs(

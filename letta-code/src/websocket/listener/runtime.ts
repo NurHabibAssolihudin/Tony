@@ -168,7 +168,9 @@ export function evictConversationRuntimeIfIdle(
     runtime.pendingInterruptedContext !== null ||
     (runtime.pendingInterruptedToolCallIds?.length ?? 0) > 0 ||
     runtime.queuedMessagesByItemId.size > 0 ||
-    runtime.queueRuntime?.length > 0
+    runtime.queueRuntime?.length > 0 ||
+    (runtime.workspaceSandbox !== undefined &&
+      runtime.listener.connectionIdsByRuntimeKey.has(runtime.key))
   ) {
     return false;
   }
@@ -253,6 +255,7 @@ export function createConversationRuntime(
     agentId: normalizedAgentId,
     conversationId: normalizedConversationId,
     skillSources: listener.skillSourcesByConversation.get(runtimeKey)?.slice(),
+    workspaceSandbox: undefined,
     activeConnectionId: null,
     turnLifecycle,
     messageQueue: Promise.resolve(),
@@ -280,6 +283,7 @@ export function createConversationRuntime(
     },
     queueRuntime: null as unknown as ConversationRuntime["queueRuntime"],
     queuedMessagesByItemId: new Map(),
+    dequeuedClientMessageIdsByBatchId: new Map(),
     queuePumpActive: false,
     queuePumpScheduled: false,
     pendingTurns: 0,
@@ -290,6 +294,7 @@ export function createConversationRuntime(
     currentToolsetPreference: "auto",
     currentLoadedTools: [],
     currentAvailableSkills: [],
+    transientChannelRuntimeTools: false,
     pendingApprovalBatchByToolCallId: new Map(),
     approvalMessageIdByToolCallId: new Map(),
     pendingInterruptedResults: null,
@@ -362,6 +367,7 @@ export function clearConversationRuntimeState(
   runtime.pendingInterruptedResults = null;
   runtime.pendingInterruptedContext = null;
   runtime.pendingInterruptedToolCallIds = null;
+  runtime.dequeuedClientMessageIdsByBatchId.clear();
   runtime.continuationEpoch += 1;
   runtime.pendingTurns = 0;
   runtime.queuePumpActive = false;
