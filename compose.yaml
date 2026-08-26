@@ -11,12 +11,11 @@ services:
       - tony-state:/root/.letta
       # Optional: mount a workspace for Tony to access, e.g.:
       # - ./:/workspace/project
-    # API keys: put them in a root-level `.env` file (never commit it), e.g.:
-    #   OPENAI_API_KEY=sk-...
-    #   ANTHROPIC_API_KEY=sk-ant-...
-    # then uncomment:
-    # env_file:
-    #   - .env
+    # LLM provider keys: copy .env.example to .env and fill in your key.
+    # Loaded automatically when the file exists; never commit .env.
+    env_file:
+      - path: .env
+        required: false
 
 volumes:
   tony-state:
