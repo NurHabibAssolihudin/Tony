@@ -1,59 +1,70 @@
 # Project Plan — Tony
 
-## 1. Ringkasan
-Tony berjalan dalam **dua fase**. **Fase 1** (fokus saat ini): **Letta Code murni** — self-host,
-LLM, agen "Tony", verifikasi memori — **tanpa komponen tambahan** (no UI custom, no SDK).
-**Fase 2**: **evaluasi & pilih** komponen otomasi ("tangan") sebelum integrasi.
+## 1. Summary
 
-## 2. Fase 1 — Letta Code Murni (Detail)
+Tony runs in **two phases**. **Phase 1** (current focus): **pure Letta Code** — self-host,
+LLM, the "Tony" agent, memory verification — **with no extra components** (no custom UI, no
+SDK). **Phase 2**: **evaluate & choose** the automation component ("hands") before any
+integration.
 
-### 2.1 Milestone
-| Milestone | Keluaran | Definisi Selesai (DoD) |
-|-----------|----------|------------------------|
-| **M1: Setup Letta lokal** | Letta Code CLI jalan | `letta` meluncurkan CLI; LLM terhubung (`/connect`) |
-| **M2: Agen "Tony" + memori** | Agen aktif & ingat lintas sesi | Chat via CLI; konteks tetap saat sesi baru (`/new`) |
-| **M3: (Opsional) Deploy** | App Server selalu-hidup + backup | `letta server` via systemd/Docker; backup `~/.letta` terjadwal |
-| **M4: Validasi & docs** | Stabil & terdokumentasi | Checklist go-live; docs & ADR lengkap |
+## 2. Phase 1 — Pure Letta Code (Detail)
 
-### 2.2 Task Breakdown (Fase 1)
-- **T1.1** Install `@letta-ai/letta-code`; setup python/make/g++
-- **T1.2** Hubungkan LLM provider (`/connect`); pilih model (`/model`)
-- **T2.1** Buat agen "Tony" (`letta --new-agent` / otomatis)
-- **T2.2** Chat via CLI; verifikasi memori lintas percakapan (`/new`)
-- **T3.1** (Opsional) Siapkan App Server (systemd/Docker) di VPS
-- **T3.2** (Opsional) Jadwalkan backup `~/.letta`
-- **T4.1** Jalankan checklist go-live
-- **T4.2** Finalisasi docs & ADR (termasuk keputusan interface)
+### 2.1 Milestones
 
-### 2.3 Estimasi & Prioritas
-- Urutan kritis: M1 → M2 → M4. M3 paralel/opsional.
-- Estimasi: M1 (0.5–1 hr), M2 (0.5 hr), M3 (1 hr), M4 (0.5 hr).
-- **P0:** chat + memori. **P1:** App Server + backup. **P2:** interface tambahan (channel) — ditunda.
+| Milestone | Outcome | Definition of Done |
+|-----------|----------|-------------------|
+| **M1: Local Letta setup** | Letta Code CLI running | `letta` launches the CLI; LLM connected (`/connect`) |
+| **M2: "Tony" agent + memory** | Agent active & remembers across sessions | Chat via CLI; context persists in a new session (`/new`) |
+| **M3: (Optional) Deploy** | Always-on App Server + backups | `letta server` via systemd/Docker; scheduled backup of `~/.letta` |
+| **M4: Validation & docs** | Stable & documented | Go-live checklist; docs & ADRs complete |
 
-## 3. Fase 2 — Otomasi ("tangan"): Evaluasi Dulu
-- **F2-M0 (SEBELUM integrasi):** evaluasi & pilih komponen otomasi — lihat
-  `10-eval-activepieces.md`. Keluaran: rekomendasi + ADR keputusan.
-- **F2-M1** Integrasi komponen terpilih ke arsitektur (bila kandidat: Activepieces via MCP).
-- **F2-M2** Uji integrasi: Tony membuat & menjalankan flow; dokumentasi.
-> Prinsip: **jangan mulai integrasi sebelum keputusan komponen final.**
+### 2.2 Task Breakdown (Phase 1)
 
-## 4. Prinsip Prioritas
-1. **Fase 1 stabil dulu** sebelum Fase 2.
-2. **Scope Fase 1 ketat** — Letta murni, tanpa tambahan.
-3. **Evaluasi sebelum komitmen** — keputusan otomasi & interface didasarkan bukti/ADR.
+- **T1.1** Install `@letta-ai/letta-code`; set up python/make/g++
+- **T1.2** Connect LLM provider (`/connect`); pick model (`/model`)
+- **T2.1** Create the "Tony" agent (`letta --new-agent` / automatic)
+- **T2.2** Chat via CLI; verify cross-conversation memory (`/new`)
+- **T3.1** (Optional) Set up an App Server (systemd/Docker) on a VPS
+- **T3.2** (Optional) Schedule backups of `~/.letta`
+- **T4.1** Run the go-live checklist
+- **T4.2** Finalize docs & ADRs (including interface decisions)
 
-## 5. Risiko pada Jadwal
-| Risiko | Tindakan |
-|--------|----------|
-| Native deps Letta (install) | Install python3/make/g++; uji di staging |
-| Letta berubah cepat | Pin versi; pantau changelog |
-| Kebuntuan evaluasi otomasi | Tetapkan kriteria & deadline keputusan di `10-eval-activepieces.md` |
+### 2.3 Estimates & Priorities
 
-## 6. Checklist Go-Live Fase 1 (DoD)
-- [ ] Letta Code CLI terinstal & LLM terkoneksi
-- [ ] Memori lintas percakapan terverifikasi
-- [ ] Chat via CLI berfungsi
-- [ ] (Opsional) App Server aktif; `:4500` tidak terpapar publik; token/secret aman
-- [ ] Backup state & config berjalan
-- [ ] `docs/` (01–10) & `README.md` lengkap
-- [ ] Git repo `main` di-push ke origin
+- Critical path: M1 → M2 → M4. M3 parallel/optional.
+- Estimates: M1 (0.5–1 hr), M2 (0.5 hr), M3 (1 hr), M4 (0.5 hr).
+- **P0:** chat + memory. **P1:** App Server + backup. **P2:** additional interfaces
+  (channels) — postponed.
+
+## 3. Phase 2 — Automation ("hands"): Evaluate First
+
+- **F2-M0 (BEFORE integration):** evaluate & choose the automation component — see
+  `10-eval-activepieces.md`. Outcome: recommendation + decision ADR.
+- **F2-M1** Integrate the chosen component into the architecture (if Activepieces: via MCP).
+- **F2-M2** Test the integration: Tony creates & runs flows; document it.
+
+> Principle: **do not start integration before the component decision is final.**
+
+## 4. Prioritization Principles
+
+1. **Stabilize Phase 1 first** before Phase 2.
+2. **Strict Phase 1 scope** — pure Letta, nothing extra.
+3. **Evaluate before committing** — automation & interface decisions based on evidence/ADRs.
+
+## 5. Schedule Risks
+
+| Risk | Action |
+|--------|--------|
+| Letta native deps (install) | Install python3/make/g++; test on staging |
+| Letta changes fast | Pin version; monitor changelog |
+| Automation evaluation deadlock | Set criteria & a decision deadline in `10-eval-activepieces.md` |
+
+## 6. Phase 1 Go-Live Checklist (DoD)
+
+- [ ] Letta Code CLI installed & LLM connected
+- [ ] Cross-conversation memory verified
+- [ ] Chat via CLI works
+- [ ] (Optional) App Server active; `:4500` not exposed publicly; tokens/secrets safe
+- [ ] State & config backups running
+- [ ] `docs/` (01–10 + `app/`) & `README.md` complete
+- [ ] Git repo `main` pushed to origin

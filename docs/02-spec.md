@@ -1,67 +1,84 @@
-# Spesifikasi Project Tony
+# Project Specification — Tony
 
-## 1. Tujuan Dokumen
-Menetapkan lingkup, kebutuhan fungsional/non-fungsional, dan kriteria penerimaan Tony. Fokus saat
-ini adalah **Fase 1**: **Letta Code murni** (self-host + interface CLI) **tanpa komponen tambahan**.
+## 1. Purpose of This Document
 
-## 2. Komponen & Lisensi
-| Komponen | Peran | Lisensi | Status |
+Establish the scope, functional/non-functional requirements, and acceptance criteria for
+Tony. The current focus is **Phase 1**: **pure Letta Code** (self-host + CLI interface)
+**with no extra components**.
+
+## 2. Components & Licenses
+
+| Component | Role | License | Status |
 |----------|-------|---------|--------|
-| Letta Code (CLI + harness) | Otak asisten (agen stateful, memori) + interface CLI | Apache 2.0 | Dipakai |
-| Interface/UI tambahan | Ditunda — kebutuhan kecil, keputusan belakangan | — | Ditunda |
-| Activepieces (kandidat "tangan") | Mesin otomasi/aksi | MIT (CE) | Fase 2 — dievaluasi |
+| Letta Code (CLI + harness) | Assistant brain (stateful agent, memory) + CLI interface | Apache 2.0 | In use |
+| Additional interface/UI | Postponed — small need, decision later | — | Postponed |
+| Activepieces ("hands" candidate) | Automation/action engine | MIT (CE) | Phase 2 — under evaluation |
 
-## 3. Lingkup Fase 1
-- ✅ Install **Letta Code CLI** (`@letta-ai/letta-code`) di mesin lokal / VPS.
-- ✅ Hubungkan **LLM provider** (OpenAI, Anthropic, Ollama, dsb.) via `/connect`.
-- ✅ Buat agen **"Tony"** dan chat via **CLI**.
-- ✅ Verifikasi **memori** lintas percakapan.
-- ✅ (Opsional) Jalankan **App Server** (`letta server`) agar selalu aktif / diakses jarak jauh.
-- ✅ (Opsional) Cadangkan state/memori agen (`~/.letta/...` / MemFS).
-- ❌ **TIDAK** membangun frontend / "Tony UI" / web chat custom di Fase 1.
-- ❌ **TIDAK** memakai Agent SDK untuk aplikasi custom di Fase 1.
-- ❌ **TIDAK** menyentuh komponen otomasi (masih dievaluasi; akan diputuskan sebelum Fase 2).
+## 3. Phase 1 Scope
 
-## 4. Requirements Fungsional (Fase 1)
-| ID | Requirement | Kriteria Penerimaan |
+- ✅ Install the **Letta Code CLI** (`@letta-ai/letta-code`) on a local machine / VPS.
+- ✅ Connect an **LLM provider** (OpenAI, Anthropic, Ollama, etc.) via `/connect`.
+- ✅ Create the **"Tony"** agent and chat via the **CLI**.
+- ✅ Verify **memory** across conversations.
+- ✅ (Optional) Run the **App Server** (`letta server`) for always-on / remote access.
+- ✅ (Optional) Back up agent state/memory (`~/.letta/...` / MemFS).
+- ❌ **NOT** building a frontend / "Tony UI" / custom web chat in Phase 1.
+- ❌ **NOT** using the Agent SDK for custom applications in Phase 1.
+- ❌ **NOT** touching automation components (still under evaluation; decided before Phase 2).
+
+## 4. Functional Requirements (Phase 1)
+
+| ID | Requirement | Acceptance Criteria |
 |----|-------------|---------------------|
-| FR-01 | Letta Code CLI terinstal & berjalan | `letta` meluncurkan antarmuka interaktif |
-| FR-02 | LLM provider terhubung | `/connect` berhasil; agen dapat menjawab |
-| FR-03 | Agen "Tony" aktif via CLI | Chat interaktif berfungsi (input → jawaban streaming) |
-| FR-04 | Tony **ingat** lintas percakapan | Mulai sesi baru tetap menyimpan konteks/memori |
-| FR-05 | (Opsional) App Server self-hosted | `letta server` berjalan; state di MemFS |
-| FR-06 | (Opsional) Back-up memori | `~/.letta` dapat dicadangkan/dipulihkan |
+| FR-01 | Letta Code CLI installed & running | `letta` launches the interactive interface |
+| FR-02 | LLM provider connected | `/connect` succeeds; agent can answer |
+| FR-03 | "Tony" agent active via CLI | Interactive chat works (input → streamed reply) |
+| FR-04 | Tony **remembers** across conversations | A new session retains context/memory |
+| FR-05 | (Optional) Self-hosted App Server | `letta server` runs; state in MemFS |
+| FR-06 | (Optional) Memory backup | `~/.letta` can be backed up/restored |
 
-## 5. Requirements Non-Fungsional (Fase 1)
-| ID | Kategori | Requirement |
+## 5. Non-Functional Requirements (Phase 1)
+
+| ID | Category | Requirement |
 |----|----------|-------------|
-| NFR-01 | Availability | App Server (bila dipakai) `restart: always` / systemd |
-| NFR-02 | Security | API key disimpan aman (`.env`/keyring); jangan di-commit; jangan expose App Server publik langsung |
-| NFR-03 | Performa | Respon chat lancar; memori disimpan efisien (MemFS) |
-| NFR-04 | Maintainability | Monorepo terstruktur; dokumentasi lengkap |
-| NFR-05 | Portability | Letta mudah di-install ulang / dipindah (Node 22.19+ + native deps) |
-| NFR-06 | Backups | Cadangkan state/memori agen (`~/.letta` / MemFS) & config |
-| NFR-07 | Licensing | Letta (Apache 2.0) dipakai sesuai syarat (atribusi) |
+| NFR-01 | Availability | App Server (if used) `restart: always` / systemd |
+| NFR-02 | Security | API keys stored safely (`.env`/keyring); never committed; App Server never exposed directly to the public internet |
+| NFR-03 | Performance | Chat responses are smooth; memory stored efficiently (MemFS) |
+| NFR-04 | Maintainability | Structured monorepo; complete documentation |
+| NFR-05 | Portability | Letta easy to reinstall/move (Node 22.19+ + native deps) |
+| NFR-06 | Backups | Agent state/memory (`~/.letta` / MemFS) & config backed up |
+| NFR-07 | Licensing | Letta (Apache 2.0) used per its terms (attribution) |
 
-## 6. Arsitektur Deployment (Fase 1)
+## 6. Deployment Architecture (Phase 1)
+
 ```
-        User ──terminal/SSH──►  Letta Code CLI (lokal / VPS)
+        User ──terminal/SSH──►  Letta Code CLI (local / VPS)
                                    │  MemFS state ~/.letta
                                    ▼
                               LLM provider (API)
-        (opsional, selalu-hidup)
+        (optional, always-on)
         User ──SSH──►  Letta App Server (letta server, :4500 internal)
 ```
-- Interface utama adalah **CLI**; tidak ada web yang diekspos publik di Fase 1.
-- Nginx/HTTPS/domain hanya relevan bila nanti ada interface web/channel — di luar scope saat ini.
 
-## 7. Lingkup Fase 2 (Ringkas / Belum Diputuskan)
-- **Evaluasi** komponen otomasi ("tangan"): Activepieces vs n8n vs Dify vs lain — lihat
-  `10-eval-activepieces.md`.
-- Keputusan dicatat sebagai ADR sebelum integrasi dimulai.
-- Detail perencanaan di `08-plan.md`.
+- The primary interface is the **CLI**; nothing web-facing is exposed publicly in Phase 1.
+- Nginx/HTTPS/domain only become relevant when a web interface/channel is added later —
+  out of scope for now.
 
-## 8. Di Luar Lingkup Saat Ini
-- Pembangunan frontend/web UI custom.
-- Modifikasi mendalam internal Letta harness.
-- Integrasi otomasi nyata (menunggu keputusan evaluasi).
+## 7. Phase 2 Scope (Summary / Undecided)
+
+- **Evaluate** the automation component ("hands"): Activepieces vs n8n vs Dify vs others —
+  see `10-eval-activepieces.md`.
+- The decision is recorded as an ADR before integration starts.
+- Detailed planning in `08-plan.md`.
+
+## 8. Explicitly Out of Scope Right Now
+
+- Building a custom frontend/web UI.
+- Deep modifications to the Letta harness internals.
+- Real automation integration (awaiting the evaluation decision).
+
+## 9. Vendored Engine
+
+The engine source is vendored at `letta-code/` (pinned **v0.30.32**, upstream commit
+`1e78870`). Its application documentation is curated under `docs/app/` and owned by this
+project — it does not reset when re-vendoring upstream releases.

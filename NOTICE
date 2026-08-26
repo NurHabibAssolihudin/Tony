@@ -1,0 +1,27 @@
+Tony
+Copyright 2026 NurHabibAssolihudin
+
+This product includes software developed as part of the Tony project.
+
+==============================================================================
+
+This project vendors and builds upon Letta Code.
+
+Letta Code
+Copyright (c) Letta (formerly MemGPT)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Vendored source: https://github.com/letta-ai/letta-code
+Pinned release: v0.30.32 (upstream commit 1e7887012fedbb0b3055cc9b28b920670130df50)
+Vendored location: letta-code/

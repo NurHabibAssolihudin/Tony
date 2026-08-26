@@ -1,113 +1,147 @@
-# Panduan Developer (Dev Guide) — Project Tony
+# Developer Guide — Project Tony
 
-> Fokus Fase 1: menjalankan **Letta Code murni** — install, hubungkan LLM, buat agen "Tony",
-> dan verifikasi memori — **tanpa membangun UI/frontend tambahan**.
+> Phase 1 focus: run **pure Letta Code** — install, connect an LLM, create the "Tony"
+> agent, and verify memory — **without building any extra UI/frontend**.
 
-## 1. Prasyarat Lokal
+## 1. Local Prerequisites
+
 - **Git**
 - **Node.js 22.19+** (`node --version`)
-- **Python 3 + make + g++** (untuk native deps Letta saat install)
-- **Docker/systemd** (opsional, untuk App Server selalu-hidup)
+- **Python 3 + make + g++** (for Letta native deps during install)
+- **Docker/systemd** (optional, for an always-on App Server)
 
-## 2. Setup Lokal
+## 2. Local Setup
 
-### 2.1 Install Letta Code CLI
+### 2.1 Install the Letta Code CLI
+
 ```powershell
-# install CLI (compile native -> butuh python/make/g++)
+# install CLI (native compile -> needs python/make/g++)
 npm install -g @letta-ai/letta-code
 ```
 
-### 2.2 Jalankan CLI & buat agen "Tony"
+### 2.2 Launch the CLI & create the "Tony" agent
+
 ```powershell
-# buka direktori kerja, lalu:
+# open your working directory, then:
 letta
 ```
-- Pertama kali dijalankan, agen lokal dibuat otomatis; state tersimpan lokal, **tanpa login**.
-- Bisa juga membuat agen baru dengan preset tertentu:
+
+- On first run a local agent is created automatically; state is stored locally,
+  **no login required**.
+- You can also create an agent from a preset:
+
 ```powershell
-letta --new-agent --personality tutorial   # agen demo
-```
-- Slash commands utama di dalam CLI:
-  - `/connect` — hubungkan LLM provider (OpenAI/ChatGPT, Anthropic, Ollama, LM Studio, Z.ai, dll)
-  - `/model` — pilih model
-  - `/new` — mulai percakapan baru · `/resume` — lanjut percakapan
-  - `/agent` — pindah/ganti agen · `/search` — cari pesan/agen · `/help` — bantuan
-  - `/skills` — lihat skills · `/palace`, `/doctor`, `/sleeptime` — audit/manajemen memori
-- **Headless / non-interaktif:**
-```powershell
-letta -p --agent <agent-id> "pesan"          # kirim pesan satu kali
-letta --agent <agent-id>                     # lanjut agent tertentu
+letta --new-agent --personality tutorial   # demo agent
 ```
 
-### 2.3 Verifikasi memori lintas percakapan
+- Main slash commands inside the CLI:
+  - `/connect` — connect an LLM provider (OpenAI/ChatGPT, Anthropic, Ollama, LM Studio, Z.ai, etc.)
+  - `/model` — pick a model
+  - `/new` — start a new conversation · `/resume` — continue one
+  - `/agent` — switch agents · `/search` — search messages/agents · `/help` — help
+  - `/skills` — view skills · `/palace`, `/doctor`, `/sleeptime` — memory audit/management
+- **Headless / non-interactive:**
+
 ```powershell
-# 1) Ceritakan sesuatu ke Tony, lalu catat jawabannya
-# 2) Keluar (Ctrl+D), jalankan letta lagi, lalu /new untuk percakapan baru
-# 3) Tanyakan: "Apa yang kuceritakan tadi?" -> harus diingat Tony
+letta -p --agent <agent-id> "message"        # send one message
+letta --agent <agent-id>                     # continue a specific agent
 ```
-Opsional, cek state memori via subcommand:
+
+### 2.3 Verify cross-conversation memory
+
+```powershell
+# 1) Tell Tony something, note its answer
+# 2) Exit (Ctrl+D), run letta again, then /new for a fresh conversation
+# 3) Ask: "What did I tell you earlier?" -> Tony must remember
+```
+
+Optionally inspect memory state via subcommands:
+
 ```powershell
 letta memory status --agent <agent-id>
 letta memory diff --agent <agent-id>
 ```
 
-### 2.4 App Server (opsional — selalu-hidup / remote)
+### 2.4 App Server (optional — always-on / remote)
+
 ```powershell
 letta server --backend local --listen ws://127.0.0.1:4500
 ```
-- Proses mencetak base URL saat start.
-- State/memori tersimpan di `~/.letta` (MemFS, git-backed).
-- > **Windows:** pastikan `python`, `make` (via mingw/choco), dan `g++` tersedia; atau gunakan
-  > WSL/Docker untuk kemudahan.
 
-## 3. Struktur Repo
+- The process prints its base URL on start.
+- State/memory is stored in `~/.letta` (MemFS, git-backed).
+- > **Windows:** make sure `python`, `make` (via mingw/choco), and `g++` are available; or use
+  > WSL/Docker for convenience.
+
+## 3. Repository Layout
+
 ```
 tony/
-├── letta-code/        # source Letta Code (vendor, untuk referensi/riset) — ter-pin v0.30.32
-├── docs/              # dokumentasi project
+├── letta-code/        # vendored engine source (pinned v0.30.32, reference/dev)
+├── docs/
+│   ├── app/           # native application documentation (curated from letta-code)
+│   └── 01–10          # major development plan
 └── README.md
 ```
-Vendor dilakukan sebagai plain copy (tanpa `.git`) dari **tag rilis upstream**, saat ini
-**v0.30.32** (commit `1e78870`). Untuk memperbarui vendor:
+
+### Vendored engine & documentation ownership
+
+The engine is vendored as a plain copy (no `.git`) from an upstream **release tag**,
+currently **v0.30.32** (commit `1e78870`). To update the vendor:
+
 ```powershell
 Remove-Item -Recurse -Force letta-code
 git clone --depth 1 --branch vX.Y.Z https://github.com/letta-ai/letta-code letta-code
 Remove-Item -Recurse -Force letta-code\.git
-# lalu update catatan versi ter-pin di README.md & dokumen ini
+# then re-pin the version in README.md, NOTICE, and this document,
+# and manually sync docs/app/ against the upstream release notes/changelog
 ```
 
-## 4. Interface Lain (di luar scope Fase 1)
-Letta Code punya interface **first-party** tanpa kode custom — dicatat di sini untuk referensi:
-- **Channels:** `letta server --backend local --channels telegram` (juga slack, discord,
-  whatsapp, signal) → chat dari aplikasi pesan yang sudah dipakai.
-- **Desktop app** (Windows/macOS/Linux) — branding Letta.
-- **chat.letta.com** — **cloud-only**, tidak bisa dipakai untuk agent self-hosted.
-Keputusan memakai interface tambahan ditunda (ADR-010).
+> `docs/app/` is owned by this project (moved out of `letta-code/`). Re-vendoring resets
+> only `letta-code/`; the curated docs must be synced by hand per release.
 
-## 5. Konvensi Kode & Workflow
-- **Commit:** conventional commits (`feat:`, `fix:`, `docs:`).
-- **Dokumentasi:** setiap keputusan baru → tambah ADR (`docs/09-adr.md`).
+## 4. Other Interfaces (out of Phase 1 scope)
 
-## 6. Validasi (Fase 1)
-- [ ] `letta` berjalan & LLM terhubung (`/connect`)
-- [ ] Chat interaktif berfungsi
-- [ ] Memori lintas sesi terverifikasi (poin 2.3)
-- [ ] (Opsional) App Server `letta server` hidup
-- [ ] (Opsional) Backup `~/.letta` terjadwal
+Letta Code ships first-party interfaces that need zero custom code — recorded here for
+reference:
 
-## 7. Troubleshooting Umum
-| Masalah | Solusi |
-|---------|--------|
-| `letta` tidak dikenali | `npm install -g @letta-ai/letta-code`; cek PATH |
-| Gagal compile native | Install python3/make/g++; coba WSL/Docker |
-| Model tidak merespons | `/connect` ulang; cek API key; `/model` ganti model |
-| Memori hilang setelah restart | Pastikan `~/.letta` tidak terhapus; backup rutin |
-| Port bentrok | Ubah port di flag `--listen` |
+- **Channels:** `letta server --backend local --channels telegram` (also slack, discord,
+  whatsapp, signal) → chat from messaging apps you already use.
+- **Desktop app** (Windows/macOS/Linux) — Letta branding.
+- **chat.letta.com** — **cloud-only**, cannot be used with self-hosted agents.
 
-## 8. Catatan Keamanan
-- Jangan expose App Server ke publik langsung.
-- API key disimpan aman (keyring / `.env` lokal, jangan di-commit).
+Decisions about additional interfaces are postponed (ADR-010).
 
-## 9. Catatan Lisensi
-- Letta: **Apache 2.0** — sertakan atribusi/NOTICE bila mendistribusikan.
-- Komponen otomasi (Fase 2): belum diputuskan (lihat `10-eval-activepieces.md`).
+## 5. Conventions & Workflow
+
+- **Commits:** conventional commits (`feat:`, `fix:`, `docs:`).
+- **Documentation:** every new decision → add an ADR (`docs/09-adr.md`).
+- **Language:** project documentation is written in English.
+
+## 6. Validation (Phase 1)
+
+- [ ] `letta` runs & LLM connected (`/connect`)
+- [ ] Interactive chat works
+- [ ] Cross-session memory verified (§ 2.3)
+- [ ] (Optional) App Server `letta server` alive
+- [ ] (Optional) Scheduled backup of `~/.letta`
+
+## 7. Common Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `letta` not recognized | `npm install -g @letta-ai/letta-code`; check PATH |
+| Native build fails | Install python3/make/g++; try WSL/Docker |
+| Model not responding | Re-run `/connect`; check API key; switch model via `/model` |
+| Memory lost after restart | Make sure `~/.letta` was not deleted; back up regularly |
+| Port conflict | Change the port via the `--listen` flag |
+
+## 8. Security Notes
+
+- Never expose the App Server directly to the public internet.
+- Store API keys safely (keyring / local `.env`, never committed).
+
+## 9. License Notes
+
+- Letta: **Apache 2.0** — include attribution/NOTICE when distributing.
+- Automation component (Phase 2): undecided (see `10-eval-activepieces.md`).

@@ -1,78 +1,93 @@
 # Tech Stack — Project Tony
 
-## 1. Ringkasan
-Tony berjalan **murni di atas Letta Code** (Apache 2.0) sebagai otak asisten dan interface CLI.
-Tidak ada frontend custom, tidak ada Agent SDK aplikasi, dan komponen otomasi (Fase 2) masih
-**dievaluasi**.
+## 1. Summary
 
-## 2. Stack Fase 1 — Letta Code (agen stateful + CLI)
+Tony runs purely on **Letta Code** (Apache 2.0) as the assistant brain and CLI interface.
+There is no custom frontend, no Agent SDK application, and the automation component
+(Phase 2) is still **under evaluation**.
+
+## 2. Phase 1 Stack — Letta Code (stateful agent + CLI)
 
 ### 2.1 Runtime & Install
-| Komponen | Teknologi | Alasan |
-|----------|-----------|--------|
-| Harness / CLI | **`@letta-ai/letta-code`** (npm, Node 22.19+) | Cara resmi menjalankan Letta; CLI interaktif |
-| Runtime package | **Bun** (bun.lock, bundling internal) | Package manager/build resmi proyek Letta |
-| Native deps | **Python 3 + make + g++** | Diperlukan saat instalasi (compile native) |
-| App Server (opsional) | `letta server --backend local --listen ws://127.0.0.1:4500` | Always-on / akses jarak jauh via SSH |
-| Model inference | Provider via CLI: OpenAI, Anthropic, Ollama, LM Studio, dsb. | Model-agnostic (`/connect`, `/model`) |
-| Storage | **MemFS** (git-based memori agen) di `~/.letta/...` | State & memori lokal, mudah di-backup |
 
-### 2.2 Lisensi
-- **Apache 2.0** — permissive: komersial, modifikasi, distribusi, turunan berbayar diizinkan;
-  hanya perlu atribusi/NOTICE.
+| Component | Technology | Why |
+|----------|-----------|-----|
+| Harness / CLI | **`@letta-ai/letta-code`** (npm, Node 22.19+) | The official way to run Letta; interactive CLI |
+| Package runtime | **Bun** (bun.lock, internal bundling) | Letta's official package manager/build |
+| Native deps | **Python 3 + make + g++** | Required at install time (native compile) |
+| App Server (optional) | `letta server --backend local --listen ws://127.0.0.1:4500` | Always-on / remote access via SSH |
+| Model inference | Providers via CLI: OpenAI, Anthropic, Ollama, LM Studio, etc. | Model-agnostic (`/connect`, `/model`) |
+| Storage | **MemFS** (git-based agent memory) in `~/.letta/...` | Local state & memory, easy to back up |
 
-## 3. Interface (Fase 1)
-| Interface | Status | Catatan |
-|-----------|--------|---------|
-| **CLI interaktif** (`letta`) | ✅ Jalur utama | Chat, `/connect`, `/model`, `/new`, `/agent` |
-| Channels (Telegram/Slack/Discord/WhatsApp/Signal) | 📋 Opsi first-party | Di luar scope Fase 1; tanpa kode custom |
-| Desktop app Letta | 📋 Opsi first-party | Branding Letta; di luar scope |
-| chat.letta.com (web/mobile) | ❌ Cloud-only | Tidak bisa dipakai untuk agent self-hosted |
-| UI custom / Agent SDK | ❌ Ditunda | Kebutuhan kecil; diputuskan belakangan |
+### 2.2 License
 
-## 4. Stack Fase 2 — Otomasi ("tangan", **belum diputuskan**)
-Kandidat yang sedang dievaluasi di `10-eval-activepieces.md`:
-| Kandidat | Stack | Lisensi | Catatan |
-|----------|-------|---------|---------|
-| Activepieces | TypeScript/Fastify/BullMQ, PostgreSQL+Redis, React+Tailwind | **MIT (CE)** + komersial (fitur enterprise) | MCP native; kandidat terdepan |
-| n8n | TypeScript, MySQL/Postgres | Fair-code (Sustainable Use) | Bukan fully open-source |
-| Dify | Python/Flask, Postgres, Vue | Modified Apache 2.0 (pembatasan multi-tenant/logo) | Lebih ke "otak", bukan "tangan" |
+- **Apache 2.0** — permissive: commercial use, modification, distribution, and paid
+  derivatives allowed; attribution/NOTICE only.
+
+## 3. Interfaces (Phase 1)
+
+| Interface | Status | Notes |
+|-----------|--------|-------|
+| **Interactive CLI** (`letta`) | ✅ Primary path | Chat, `/connect`, `/model`, `/new`, `/agent` |
+| Channels (Telegram/Slack/Discord/WhatsApp/Signal) | 📋 First-party option | Out of Phase 1 scope; zero custom code |
+| Letta desktop app | 📋 First-party option | Letta branding; out of scope |
+| chat.letta.com (web/mobile) | ❌ Cloud-only | Cannot be used with self-hosted agents |
+| Custom UI / Agent SDK | ❌ Postponed | Small need; decided later |
+
+## 4. Phase 2 Stack — Automation ("hands", **undecided**)
+
+Candidates under evaluation in `10-eval-activepieces.md`:
+
+| Candidate | Stack | License | Notes |
+|----------|-------|---------|-------|
+| Activepieces | TypeScript/Fastify/BullMQ, PostgreSQL+Redis, React+Tailwind | **MIT (CE)** + commercial (enterprise features) | MCP-native; leading candidate |
+| n8n | TypeScript, MySQL/Postgres | Fair-code (Sustainable Use) | Not fully open-source |
+| Dify | Python/Flask, Postgres, Vue | Modified Apache 2.0 (multi-tenant/logo restrictions) | More a "brain" than "hands" |
 | Make / Zapier | — | Proprietary | Cloud-only |
 
-## 5. Integrasi Jembatan (Fase 2, bila diputuskan)
-- Letta mendukung **MCP client/tools**.
-- Activepieces menyediakan **MCP server** bawaan — potensi jembatan natural.
-- Keputusan akhir belum diambil; tergantung hasil evaluasi.
+## 5. Integration Bridge (Phase 2, if decided)
 
-## 6. Infrastruktur Deployment
-| Komponen | Teknologi | Keterangan |
-|----------|-----------|-----------|
-| App Server (opsional) | systemd atau Docker `letta server` | Selalu hidup di VPS |
-| Reverse proxy | — | Tidak dibutuhkan Fase 1 (tanpa web) |
-| Node.js | 22.19+ | CLI & harness |
-| Backup | cron/rsync `~/.letta` | State & memori |
+- Letta supports **MCP client/tools**.
+- Activepieces ships a native **MCP server** — a natural bridge.
+- Final decision pending; depends on the evaluation outcome.
 
-## 7. Desain Monorepo
+## 6. Deployment Infrastructure
+
+| Component | Technology | Remarks |
+|----------|-----------|---------|
+| App Server (optional) | systemd or Docker `letta server` | Always-on on a VPS |
+| Reverse proxy | — | Not needed in Phase 1 (no web) |
+| Node.js | 22.19+ | Letta Code CLI runtime |
+| Backup | cron/rsync of `~/.letta` | State & memory |
+
+## 7. Monorepo Design
+
 ```
-tony/                              # = D:\Projects\Tony
-├── letta-code/                    # source Letta Code (vendor, untuk referensi/dev)
-├── docs/                          # dokumentasi (file ini)
+tony/                              # = this repository
+├── letta-code/                    # vendored engine source (pinned v0.30.32; reference/dev)
+├── docs/
+│   ├── app/                       # native application docs (curated from letta-code)
+│   ├── 01–10                      # major development plan (this set)
+│   └── ...
 └── README.md
 ```
-> Tidak ada workspace pnpm untuk Fase 1 — Tony tidak membangun aplikasi sendiri saat ini.
-> `apps/`, `packages/`, `infra/` akan dibuat hanya bila benar-benar diperlukan.
 
-## 8. Tooling Pendukung
-| Tool | Peran |
-|------|-------|
+> No pnpm workspace for Phase 1 — Tony does not build its own application yet.
+> `apps/`, `packages/`, `infra/` will be created only when truly needed.
+
+## 8. Supporting Tooling
+
+| Tool | Role |
+|------|------|
 | Git | Version control |
-| Node 22.19+ | Runtime Letta Code CLI |
-| Python/make/g++ | Native deps saat instalasi |
-| Docker/systemd (opsional) | App Server selalu-hidup |
+| Node 22.19+ | Letta Code CLI runtime |
+| Python/make/g++ | Native deps at install time |
+| Docker/systemd (optional) | Always-on App Server |
 
-## 9. Justifikasi Pilihan Kunci
-- **Letta Code (Apache 2.0):** lisensi permissive + kemampuan memori/learning yang membedakan
-  Tony sebagai "asisten yang beringatan", sekaligus menyediakan CLI siap-pakai → **tanpa perlu
-  membangun frontend**.
-- **Tanpa UI custom:** kebutuhan interface kecil; Letta punya CLI & interface first-party lain.
-- **Otomasi ditunda:** menghindari komitmen sebelum keputusan lisensi/arsitektur matang.
+## 9. Justification of Key Choices
+
+- **Letta Code (Apache 2.0):** permissive license + memory/learning capabilities that
+  distinguish Tony as "an assistant that remembers", plus a ready-made CLI → **no frontend
+  needed**.
+- **No custom UI:** interface needs are small; Letta ships first-party CLI & other interfaces.
+- **Automation postponed:** avoids premature commitment before license/architecture clarity.

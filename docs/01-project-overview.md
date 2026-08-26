@@ -1,64 +1,73 @@
 # Project Overview — Tony
 
-## 1. Visi
-**Tony** adalah asisten AI pribadi yang dapat di-deploy sendiri (self-hosted), dibangun di atas
-fondasi open-source berlisensi **permissive** sehingga bebas dipakai, dibagikan, dan dijadikan
-basis layanan berbayar oleh siapa pun. Tony berdesain **satu project monorepo terpadu** tanpa
-komponen tambahan yang tidak diperlukan.
+## 1. Vision
 
-Fase ini Tony berjalan **murni di atas Letta Code** (Apache 2.0) — tanpa frontend custom,
-tanpa Agent SDK, tanpa komponen UI tambahan. Interface utama adalah **CLI**.
+**Tony** is a self-hostable personal AI assistant built on an open-source foundation with a
+**permissive** license, so anyone is free to use it, share it, and build commercial
+derivatives on top of it. Tony is designed as **a single unified monorepo** without
+unnecessary extra components.
 
-Tony dirancang untuk menjadi asisten yang:
-- **Beringatan & belajar** — memakai Letta Code (agen stateful dengan memori) sehingga ingat
-  percakapan dan berkembang seiring waktu.
-- **(Fase 2) Mampu bertindak** — integrasi otomasi nyata (email, CRM, notifikasi, webhook, dll)
-  sedang dievaluasi; belum diputuskan komponennya.
-- **Self-hosted penuh** — data & kontrol milik sendiri.
+In this phase Tony runs purely on **Letta Code** (Apache 2.0) — no custom frontend, no
+Agent SDK, no additional UI components. The primary interface is the **CLI**.
 
-## 2. Fondasi: Komponen Open-Source
-| Komponen | Peran | Lisensi |
+Tony is designed to be an assistant that:
+
+- **Remembers & learns** — powered by Letta Code (a stateful agent with memory), it recalls
+  conversations and develops over time.
+- **(Phase 2) Can act** — real automation integration (email, CRM, notifications, webhooks,
+  etc.) is under evaluation; the component has not been chosen yet.
+- **Fully self-hosted** — your data, your control.
+
+## 2. Foundation: Open-Source Components
+
+| Component | Role | License |
 |----------|-------|---------|
-| **Letta Code** (d/h MemGPT) | Otak asisten + interface CLI: agen stateful dengan memori, skills, subagents, MCP | **Apache 2.0** ✅ permissive |
-| *(Interface/UI tambahan)* | Belum diputuskan; kebutuhan kecil → ditunda | — |
-| Activepieces (kandidat "tangan") | Mesin otomasi/aksi (Fase 2) | **MIT (CE)** ⏳ dievaluasi |
+| **Letta Code** (f/k/a MemGPT) | Assistant "brain" + CLI interface: stateful agent with memory, skills, subagents, MCP | **Apache 2.0** ✅ permissive |
+| *(Additional interface/UI)* | Undecided; small need → postponed | — |
+| Activepieces ("hands" candidate) | Automation/action engine (Phase 2) | **MIT (CE)** ⏳ under evaluation |
 
-## 3. Masalah yang Dipecahkan
-1. **Kebergantungan pada lisensi restriktif** → Letta (Apache 2.0) menghilangkan hambatan
-   distribusi komersial turunan.
-2. **Asisten yang "lupa"** → Letta memberi memori jangka panjang & pembelajaran berkelanjutan.
-3. **Interface web cloud yang tak bisa di-self-host** → solusi: pakai **CLI** / interface
-   first-party Letta, bukan membangun frontend sendiri (lihat ADR-010).
-4. **Kompleksitas yang tidak perlu** → tanpa UI custom, scope Fase 1 kecil dan cepat.
+## 3. Problems Solved
 
-## 4. Peta Jalan 2 Fase
-| Fase | Cakupan | Keluaran |
-|------|---------|----------|
-| **Fase 1 (sekarang)** | **Letta Code murni**: self-host, connect LLM provider, buat agen "Tony", verifikasi memori, interface CLI | Tony beringatan & self-hosted, dipakai via terminal |
-| **Fase 2 (nanti)** | **Evaluasi & pilih** komponen otomasi ("tangan"); integrasi bila terpilih | Tony bisa membuat & menjalankan otomasi nyata |
+1. **Dependence on restrictive licenses** → Letta (Apache 2.0) removes barriers to
+   distributing commercial derivatives.
+2. **Assistants that "forget"** → Letta provides long-term memory & continual learning.
+3. **Cloud web interfaces that cannot be self-hosted** → solution: use the **CLI** /
+   first-party Letta interfaces instead of building our own frontend (see ADR-010).
+4. **Unnecessary complexity** → no custom UI keeps Phase 1 scope small and fast.
 
-## 5. Arsitektur High-Level (Target Akhir)
+## 4. Two-Phase Roadmap
+
+| Phase | Scope | Outcome |
+|------|---------|---------|
+| **Phase 1 (now)** | **Pure Letta Code**: self-host, connect LLM provider, create the "Tony" agent, verify memory, CLI interface | A remembering, self-hosted Tony used from the terminal |
+| **Phase 2 (later)** | **Evaluate & choose** the automation component ("hands"); integrate if selected | Tony can create and run real automations |
+
+## 5. High-Level Architecture (End Target)
+
 ```
                  ┌───────────────────────────────────┐
    User ──►      │  Letta Code (Apache 2.0)           │
- (terminal/SSH)  │  • CLI interaktif                  │
-                 │  • agen stateful, memori (MemFS)   │
+ (terminal/SSH)  │  • interactive CLI                 │
+                 │  • stateful agent, memory (MemFS)  │
                  └───────────────┬───────────────────┘
-                                 │  tools / eksekusi
+                                 │  tools / execution
                                  ▼
                            LLM provider (API)
 ```
-Fase 1: hanya blok **Letta Code** (CLI). Fase 2: tambah komponen otomasi **jika** hasil
-evaluasi mendukung — tanpa mengubah fondasi.
 
-## 6. Persona & Use Case Utama
-- **Persona:** individu/developer yang ingin asisten AI self-hosted, ber-memori, dan kelak bisa
-  bertindak, yang legal untuk dijadikan basis project open-source/berbayar.
-- **Use case fase 1:** chat personal via terminal, memori percakapan lintas sesi.
-- **Use case fase 2 (contoh):** "kirim ringkasan rapat ke email", "tambah lead ke CRM",
-  "buat reminder" — komponennya masih dievaluasi.
+Phase 1: only the **Letta Code** block (CLI). Phase 2: add the automation component **if**
+the evaluation supports it — without changing the foundation.
 
-## 7. Keberhasilan (Definition of Success)
-- **Fase 1:** Letta Code berjalan self-hosted; LLM terhubung; agen "Tony" aktif via CLI; memori
-  lintas percakapan terverifikasi; repo monorepo bersih & terdokumentasi.
-- **Fase 2:** keputusan komponen otomasi terdokumentasi (ADR); integrasi berjalan bila dipilih.
+## 6. Persona & Primary Use Cases
+
+- **Persona:** individuals/developers who want a self-hosted AI assistant with memory that
+  can eventually act, and that is legally safe as the base of an open-source/paid project.
+- **Phase 1 use case:** personal chat via terminal, cross-session conversation memory.
+- **Phase 2 use cases (examples):** "send meeting summary by email", "add lead to CRM",
+  "create a reminder" — components still under evaluation.
+
+## 7. Definition of Success
+
+- **Phase 1:** Letta Code runs self-hosted; LLM connected; the "Tony" agent active via CLI;
+  cross-conversation memory verified; clean, well-documented monorepo.
+- **Phase 2:** automation component decision documented (ADR); integration running if selected.
