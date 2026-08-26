@@ -1,0 +1,22 @@
+services:
+  tony:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    init: true
+    stdin_open: true
+    tty: true
+    volumes:
+      # Persistent agent state/memory (MemFS) across container rebuilds
+      - tony-state:/root/.letta
+      # Optional: mount a workspace for Tony to access, e.g.:
+      # - ./:/workspace/project
+    # API keys: put them in a root-level `.env` file (never commit it), e.g.:
+    #   OPENAI_API_KEY=sk-...
+    #   ANTHROPIC_API_KEY=sk-ant-...
+    # then uncomment:
+    # env_file:
+    #   - .env
+
+volumes:
+  tony-state:

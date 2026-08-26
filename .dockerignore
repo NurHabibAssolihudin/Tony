@@ -1,0 +1,10 @@
+# Build context is the repository root; keep the image lean.
+.git
+**/node_modules
+**/.letta-local
+docs
+*.md
+NOTICE
+LICENSE
+compose.yaml
+docker/.dockerignore

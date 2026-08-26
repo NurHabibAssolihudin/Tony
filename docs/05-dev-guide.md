@@ -6,28 +6,50 @@
 ## 1. Local Prerequisites
 
 - **Git**
-- **Node.js 22.19+** (`node --version`)
-- **Python 3 + make + g++** (for Letta native deps during install)
-- **Docker/systemd** (optional, for an always-on App Server)
+- **Docker Desktop** (Linux containers) — *recommended runtime; see § 2.1*
+- **Node.js 22.19+ + Bun** — only for the non-Docker runtime options
 
 ## 2. Local Setup
 
-### 2.1 Install the Letta Code CLI
+### 2.1 Runtime options (pick one)
+
+| Option | Command | When to use |
+|--------|---------|-------------|
+| **Docker (recommended)** | `docker compose run --rm tony` | Runs the **vendored source** from this repo in a Linux container; no Windows native-deps pain; local patches take effect |
+| Source (dev) | `cd letta-code && bun install && bun run dev` | Same code path as Docker, on the host directly |
+| npm global | `npm install -g @letta-ai/letta-code` | Upstream release binary — **does not execute this repo's code**; use only as a fallback |
+
+> Philosophy note: Tony treats `letta-code/` as its native engine. The Docker image
+> (`docker/Dockerfile`) builds and runs that vendored source via `bun run dev`, so any
+> local modification is live. The upstream-provided image (`letta-code/docker/Dockerfile`)
+> installs from npm and does **not** have this property.
+
+**Docker usage:**
 
 ```powershell
-# install CLI (native compile -> needs python/make/g++)
-npm install -g @letta-ai/letta-code
+docker compose build                 # build the engine image (vendored source)
+docker compose run --rm tony         # interactive CLI session
+# tip: alias it, e.g. in PowerShell profile:
+#   function letta { docker compose run --rm tony @args }
 ```
 
-### 2.2 Launch the CLI & create the "Tony" agent
+- Agent state/memory persists in the named volume `tony-state` (`/root/.letta`).
+- API keys go through environment variables (uncomment `env_file: [.env]` in
+  `compose.yaml`; never commit `.env`) or `/connect` inside the session.
+- Mount directories Tony should access under `/workspace` (see commented example in
+  `compose.yaml`).
+
+### 2.2 Launch & first-run backend choice
 
 ```powershell
-# open your working directory, then:
-letta
+# with the Docker runtime (or `letta` if you use the alias/host install):
+docker compose run --rm tony backend local   # once: make local the saved default backend
+docker compose run --rm tony                 # then launch the interactive CLI
 ```
 
 - On first run a local agent is created automatically; state is stored locally,
-  **no login required**.
+  **no login required**. Without a saved backend, first-run setup may offer Letta
+  Cloud sign-in — pick **local mode** (or set `backend local` as above).
 - You can also create an agent from a preset:
 
 ```powershell

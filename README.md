@@ -48,7 +48,9 @@ Details: [`docs/app/features.md`](docs/app/features.md) ·
 
 ```
 tony/
-├── letta-code/        # vendored Letta Code engine source (reference/dev)
+├── letta-code/        # vendored Letta Code engine source (the runtime — built via Docker)
+├── docker/            # Tony-owned engine image (Dockerfile + entrypoint)
+├── compose.yaml       # `docker compose run --rm tony` -> interactive CLI
 ├── docs/
 │   ├── app/           # native application documentation (curated from letta-code)
 │   ├── 01–10          # major development plan (overview → roadmap → ADRs)
@@ -59,19 +61,23 @@ tony/
 ## 🚀 Run Locally (Phase 1)
 
 ```bash
-# 1) Install the Letta Code CLI (needs Node 22.19+; python/make/g++ for native builds)
-npm install -g @letta-ai/letta-code
+# 0) One-time: build the engine image from this repo's vendored source
+docker compose build
 
-# 2) Launch the CLI -> the "Tony" agent is created automatically
-letta
+# 1) Make "local" the default backend (no cloud login), then launch the CLI
+docker compose run --rm tony backend local
+docker compose run --rm tony
 
-# 3) Inside the CLI:
+# 2) Inside the CLI:
 #    /connect          # connect an LLM provider (OpenAI, Anthropic, Ollama, ...)
 #    /model            # pick a model
 #    /new              # new session — verify cross-session memory
 ```
 
-Details: [`docs/05-dev-guide.md`](docs/05-dev-guide.md).
+> This runs the **vendored Letta Code source** (`letta-code/`) in Bun dev mode inside a
+> Linux container — not an npm artifact — so local engine changes take effect. Agent
+> state persists in the `tony-state` volume. Alternatives (host source / npm) and details:
+> [`docs/05-dev-guide.md`](docs/05-dev-guide.md).
 
 ## 📚 Documentation
 
