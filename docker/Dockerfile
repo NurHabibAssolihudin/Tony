@@ -45,6 +45,11 @@ RUN bun install --frozen-lockfile
 ENV LETTA_SYSTEM_CRON_DIR=/root/.letta/system-cron \
     LETTA_SYSTEM_ROOT_CRONTAB=/root/.letta/system-crontab/root
 
+# Terminal defaults required by the TUI (Ink) inside the container
+ENV TERM=xterm-256color \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/tony-entrypoint
 
 # The agent works on /workspace (mount whatever Tony should access).
