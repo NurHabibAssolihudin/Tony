@@ -40,9 +40,9 @@ Details: [`docs/app/features.md`](docs/app/features.md) ·
 | [Letta Code](https://github.com/letta-ai/letta-code) | Brain + interface: stateful agent with memory, run via CLI | ✅ Apache 2.0 (permissive) |
 | [Activepieces](https://github.com/activepieces/activepieces) | Automation/action engine (Phase 2) | ⏳ **Under evaluation** (MIT CE) |
 
-> The Letta Code source is vendored at `letta-code/` (pinned **v0.30.32**, upstream commit
-> `1e78870`, plain copy without `.git`). Its documentation is curated as part of this
-> project under `docs/app/`.
+> The Letta Code source is vendored at `src/` (pinned **v0.30.32**, upstream commit
+> `1e78870`, moved from `letta-code/` to project root). Its documentation is curated as
+> part of this project under `docs/app/`.
 
 ## 📁 Repository Structure
 
@@ -74,7 +74,7 @@ docker compose run --rm tony
 #    /new              # new session — verify cross-session memory
 ```
 
-> This runs the **vendored Letta Code source** (`letta-code/`) in Bun dev mode inside a
+> This runs the **Letta Code engine source** (`src/`) in Bun dev mode inside a
 > Linux container — not an npm artifact — so local engine changes take effect. Agent
 > state persists in the `tony-state` volume. Alternatives (host source / npm) and details:
 > [`docs/05-dev-guide.md`](docs/05-dev-guide.md).

@@ -64,7 +64,7 @@ Candidates under evaluation in `10-eval-activepieces.md`:
 
 ```
 tony/                              # = this repository
-├── letta-code/                    # vendored engine source (pinned v0.30.32; reference/dev)
+├── src/                           # engine source (moved from letta-code/ to root)
 ├── docs/
 │   ├── app/                       # native application docs (curated from letta-code)
 │   ├── 01–10                      # major development plan (this set)

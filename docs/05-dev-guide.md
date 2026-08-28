@@ -15,13 +15,13 @@
 
 | Option | Command | When to use |
 |--------|---------|-------------|
-| **Docker (recommended)** | `docker compose run --rm tony` | Runs the **vendored source** from this repo in a Linux container; no Windows native-deps pain; local patches take effect |
-| Source (dev) | `cd letta-code && bun install && bun run dev` | Same code path as Docker, on the host directly |
+| **Docker (recommended)** | `docker compose run --rm tony` | Runs the **engine source** from this repo in a Linux container; no Windows native-deps pain; local patches take effect |
+| Source (dev) | `bun install && bun run dev` | Same code path as Docker, on the host directly |
 | npm global | `npm install -g @letta-ai/letta-code` | Upstream release binary — **does not execute this repo's code**; use only as a fallback |
 
-> Philosophy note: Tony treats `letta-code/` as its native engine. The Docker image
-> (`docker/Dockerfile`) builds and runs that vendored source via `bun run dev`, so any
-> local modification is live. The upstream-provided image (`letta-code/docker/Dockerfile`)
+> Philosophy note: Tony treats this repo as its native engine. The Docker image
+> (`docker/Dockerfile`) builds and runs the engine source via `bun run dev`, so any
+> local modification is live. The upstream-provided npm package (`@letta-ai/letta-code`)
 > installs from npm and does **not** have this property.
 
 **Docker usage:**
@@ -99,28 +99,29 @@ letta server --backend local --listen ws://127.0.0.1:4500
 
 ```
 tony/
-├── letta-code/        # vendored engine source (pinned v0.30.32, reference/dev)
+├── src/               # engine source (moved from letta-code/ to root)
 ├── docs/
 │   ├── app/           # native application documentation (curated from letta-code)
 │   └── 01–10          # major development plan
 └── README.md
 ```
 
-### Vendored engine & documentation ownership
+### Engine source & documentation ownership
 
-The engine is vendored as a plain copy (no `.git`) from an upstream **release tag**,
-currently **v0.30.32** (commit `1e78870`). To update the vendor:
+The engine source was vendored from Letta Code release **v0.30.32** (commit `1e78870`).
+The vendored `letta-code/` directory has been moved to root level for cleaner project
+structure. To re-vendor from upstream:
 
 ```powershell
-Remove-Item -Recurse -Force letta-code
-git clone --depth 1 --branch vX.Y.Z https://github.com/letta-ai/letta-code letta-code
-Remove-Item -Recurse -Force letta-code\.git
+# Remove current source and clone fresh from upstream release
+git rm -rf src
+git clone --depth 1 --branch vX.Y.Z https://github.com/letta-ai/letta-code src
 # then re-pin the version in README.md, NOTICE, and this document,
 # and manually sync docs/app/ against the upstream release notes/changelog
 ```
 
-> `docs/app/` is owned by this project (moved out of `letta-code/`). Re-vendoring resets
-> only `letta-code/`; the curated docs must be synced by hand per release.
+> `docs/app/` is owned by this project (curated from upstream). Re-vendoring resets
+> only `src/`; the curated docs must be synced by hand per release.
 
 ## 4. Other Interfaces (out of Phase 1 scope)
 

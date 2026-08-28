@@ -8,7 +8,7 @@ export LETTA_DEBUG
 # The agent's project working directory (mount user dirs here).
 cd "${TONY_WORKSPACE_DIR:-/workspace}"
 
-# Run the vendored source directly (absolute path) so module resolution uses
+# Run the source directly (absolute path) so module resolution uses
 # /app/node_modules while process.cwd() stays on the workspace.
 exec bun \
   --loader=.md:text \

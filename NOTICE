@@ -24,4 +24,4 @@ limitations under the License.
 
 Vendored source: https://github.com/letta-ai/letta-code
 Pinned release: v0.30.32 (upstream commit 1e7887012fedbb0b3055cc9b28b920670130df50)
-Vendored location: letta-code/
+Source location: src/ (moved from letta-code/ to project root)

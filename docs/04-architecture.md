@@ -36,7 +36,7 @@ stored. Nothing about file access routes through any cloud.
 
 ```
 tony/
-├── letta-code/                  # vendored engine source (pinned v0.30.32)
+├── src/                        # engine source (moved from letta-code/ to root)
 ├── docs/
 │   ├── app/                     # native application docs (curated from letta-code)
 │   ├── 01-project-overview.md   # major development plan (this set)
