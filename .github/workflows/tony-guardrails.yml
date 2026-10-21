@@ -1,0 +1,39 @@
+name: Tony Guardrails
+
+# Tony-owned structural guardrails for the vendored engine. These are separate
+# from the upstream ci.yml and do not need any secrets.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  vendor-and-pins:
+    name: Vendored engine & pin refs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Vendored engine patches are tracked
+        run: |
+          set -euo pipefail
+          count=$(git ls-files engine/vendor | wc -l | tr -d ' ')
+          echo "tracked engine/vendor files: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::engine/vendor is not tracked in git; see docs/12-vendor-sync.md"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Pinned version references are consistent
+        run: node scripts/tony/check-pins.mjs
