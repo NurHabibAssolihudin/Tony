@@ -34,7 +34,7 @@ source) uses the mod system to generate new mods:
    `.letta/mod-learning-runs/`.
 
 ```bash
-bun run mod-learning:memory-citations      # from letta-code/ source checkout
+bun run mod-learning:memory-citations      # from the engine/ source checkout
 ```
 
 Inside the TUI: `/mods learn memory-citations` streams progress into the transcript and

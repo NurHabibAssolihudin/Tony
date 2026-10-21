@@ -72,7 +72,7 @@ the stack).
 ## 5. Protocol Mapping (existing engine surface)
 
 Panels are thin views over the App Server management protocol
-(`letta-code/src/websocket/listener/commands/`) — the same surface the official
+(`engine/src/websocket/listener/commands/`) — the same surface the official
 desktop app consumes. Client library: `app-server-client.js` (exported by the
 npm package).
 

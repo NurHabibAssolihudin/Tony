@@ -99,29 +99,35 @@ letta server --backend local --listen ws://127.0.0.1:4500
 
 ```
 tony/
-├── src/               # engine source (moved from letta-code/ to root)
+├── engine/             # engine source (vendored Letta Code)
+│   ├── src/
+│   ├── scripts/
+│   └── vendor/         # patched ink / ink-text-input build files
+├── docker/             # Tony-owned engine image
+├── package.json        # thin wrapper → engine/ scripts
 ├── docs/
-│   ├── app/           # native application documentation (curated from letta-code)
-│   └── 01–10          # major development plan
+│   ├── app/            # native application documentation (curated from letta-code)
+│   └── 01–12           # major development plan
 └── README.md
 ```
 
 ### Engine source & documentation ownership
 
-The engine source was vendored from Letta Code release **v0.30.32** (commit `1e78870`).
-The vendored `letta-code/` directory has been moved to root level for cleaner project
-structure. To re-vendor from upstream:
+The engine source was vendored from Letta Code release **v0.30.32** (commit `1e78870`)
+and lives under `engine/`. To re-vendor from upstream:
 
 ```powershell
-# Remove current source and clone fresh from upstream release
-git rm -rf src
-git clone --depth 1 --branch vX.Y.Z https://github.com/letta-ai/letta-code src
+# Remove current engine source and clone fresh from upstream release
+git rm -rf engine
+git clone --depth 1 --branch vX.Y.Z https://github.com/letta-ai/letta-code engine
 # then re-pin the version in README.md, NOTICE, and this document,
 # and manually sync docs/app/ against the upstream release notes/changelog
 ```
 
+> See `docs/12-vendor-sync.md` for the full, safe re-vendor runbook (preserving
+> Tony-owned files, the tracked `engine/vendor/` patches, and local edits).
 > `docs/app/` is owned by this project (curated from upstream). Re-vendoring resets
-> only `src/`; the curated docs must be synced by hand per release.
+> only `engine/`; the curated docs must be synced by hand per release.
 
 ## 4. Other Interfaces (out of Phase 1 scope)
 

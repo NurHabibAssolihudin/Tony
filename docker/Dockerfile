@@ -1,8 +1,8 @@
 # Tony engine runtime.
 #
-# Runs the Letta Code engine source from this repository (moved from letta-code/ to root)
-# in Bun dev mode — NOT the upstream npm artifact — so local changes to the
-# source take effect. See docs/05-dev-guide.md.
+# Runs the vendored Letta Code engine source from ./engine in Bun dev mode —
+# NOT the upstream npm artifact — so local changes to the source take effect.
+# See docs/05-dev-guide.md.
 
 FROM node:22.19-bookworm-slim
 
@@ -36,9 +36,9 @@ RUN set -eux; \
 # Bun (pinned 1.3.x line, matching letta-code packageManager bun@1.3.0)
 COPY --from=oven/bun:1.3 /usr/local/bin/bun /usr/local/bin/bun
 
-# Engine source (moved from letta-code/ to root)
+# Engine source (vendored under engine/)
 WORKDIR /app
-COPY . .
+COPY engine/ ./
 RUN bun install --frozen-lockfile
 
 # Cron dirs used by the engine's scheduling feature

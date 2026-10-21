@@ -76,7 +76,7 @@ letta server --openai-api
 
 Client integration paths:
 
-1. **WebSocket protocol** — documented protocol types live in `letta-code/src/types/app-server-protocol.ts`;
+1. **WebSocket protocol** — documented protocol types live in `engine/src/types/app-server-protocol.ts`;
    the npm package exports an official client library (`app-server-client.js`) usable by Node/Electron/Tauri apps.
 2. **OpenAI-compatible REST API** — simplest path for third-party clients (including a future Android app):
    anything that can call the OpenAI API can talk to Tony.

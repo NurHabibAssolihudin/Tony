@@ -45,4 +45,4 @@ itself (through *mods*).
 
 - Upstream repo: https://github.com/letta-ai/letta-code
 - Upstream docs: https://docs.letta.com
-- Vendored source: [`letta-code/`](../../letta-code/) (v0.30.32, commit `1e78870`)
+- Vendored source: [`engine/`](../../engine/) (v0.30.32, commit `1e78870`)
