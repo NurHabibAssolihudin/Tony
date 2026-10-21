@@ -8,6 +8,12 @@ on:
     branches:
       - main
 
+# The engine (package.json, bun.lock, scripts) lives under engine/ after the
+# Tony monorepo layout change. Run all shell steps there by default.
+defaults:
+  run:
+    working-directory: engine
+
 jobs:
   classify:
     name: Classify change

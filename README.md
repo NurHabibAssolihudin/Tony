@@ -40,20 +40,20 @@ Details: [`docs/app/features.md`](docs/app/features.md) ·
 | [Letta Code](https://github.com/letta-ai/letta-code) | Brain + interface: stateful agent with memory, run via CLI | ✅ Apache 2.0 (permissive) |
 | [Activepieces](https://github.com/activepieces/activepieces) | Automation/action engine (Phase 2) | ⏳ **Under evaluation** (MIT CE) |
 
-> The Letta Code source is vendored at `src/` (pinned **v0.30.32**, upstream commit
-> `1e78870`, moved from `letta-code/` to project root). Its documentation is curated as
-> part of this project under `docs/app/`.
+> The Letta Code source is vendored at `engine/` (pinned **v0.30.32**, upstream commit
+> `1e78870`). Its documentation is curated as part of this project under `docs/app/`.
 
 ## 📁 Repository Structure
 
 ```
 tony/
-├── letta-code/        # vendored Letta Code engine source (the runtime — built via Docker)
+├── engine/            # vendored Letta Code engine source (the runtime — built via Docker)
 ├── docker/            # Tony-owned engine image (Dockerfile + entrypoint)
 ├── compose.yaml       # `docker compose run --rm tony` -> interactive CLI
+├── package.json       # thin wrapper: `bun run check|build|dev` proxy into engine/
 ├── docs/
 │   ├── app/           # native application documentation (curated from letta-code)
-│   ├── 01–10          # major development plan (overview → roadmap → ADRs)
+│   ├── 01–12          # major development plan (overview → roadmap → ADRs)
 │   └── ...
 └── README.md
 ```
@@ -74,7 +74,7 @@ docker compose run --rm tony
 #    /new              # new session — verify cross-session memory
 ```
 
-> This runs the **Letta Code engine source** (`src/`) in Bun dev mode inside a
+> This runs the **Letta Code engine source** (`engine/`) in Bun dev mode inside a
 > Linux container — not an npm artifact — so local engine changes take effect. Agent
 > state persists in the `tony-state` volume. Alternatives (host source / npm) and details:
 > [`docs/05-dev-guide.md`](docs/05-dev-guide.md).
@@ -113,4 +113,4 @@ Native application documentation (`docs/app/`):
 Tony's engine is **Apache 2.0** licensed: free to use, modify, distribute, and build
 commercial derivatives with attribution. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 When distributing, include the license/NOTICE of bundled components (the vendored engine
-keeps its own copy at `letta-code/LICENSE`).
+source lives at `engine/`; its Apache 2.0 license is reproduced in the root `LICENSE`).

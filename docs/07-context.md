@@ -49,7 +49,7 @@ references. Full decisions live in `09-adr.md`.
 - Phase 1 interface = **CLI**; other interfaces (channels/desktop) postponed (ADR-010).
 - Automation component (Phase 2) **unselected**; evaluation in `10-eval-activepieces.md`.
 - Server: Ubuntu VPS + systemd/Docker (optional, for an always-on App Server).
-- Engine source vendored at `letta-code/` pinned to release tag **v0.30.32**.
+- Engine source vendored at `engine/` pinned to release tag **v0.30.32**.
 
 ## 4. Risks & Mitigations
 

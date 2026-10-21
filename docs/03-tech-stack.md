@@ -64,10 +64,10 @@ Candidates under evaluation in `10-eval-activepieces.md`:
 
 ```
 tony/                              # = this repository
-├── src/                           # engine source (moved from letta-code/ to root)
+├── engine/                        # engine source (vendored Letta Code)
 ├── docs/
 │   ├── app/                       # native application docs (curated from letta-code)
-│   ├── 01–10                      # major development plan (this set)
+│   ├── 01–12                      # major development plan (this set)
 │   └── ...
 └── README.md
 ```

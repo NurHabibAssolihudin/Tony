@@ -79,6 +79,6 @@ Tony. The current focus is **Phase 1**: **pure Letta Code** (self-host + CLI int
 
 ## 9. Vendored Engine
 
-The engine source is vendored at `letta-code/` (pinned **v0.30.32**, upstream commit
+The engine source is vendored at `engine/` (pinned **v0.30.32**, upstream commit
 `1e78870`). Its application documentation is curated under `docs/app/` and owned by this
 project — it does not reset when re-vendoring upstream releases.
