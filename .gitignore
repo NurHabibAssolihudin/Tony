@@ -4,10 +4,13 @@ node_modules/
 .pnp.js
 
 # Build outputs
+# NOTE: `/build/` is anchored to the repo root on purpose. A bare `build/`
+# would also match vendored package output such as `vendor/ink/build`, which
+# must stay tracked (see docs/12-vendor-sync.md).
 .next/
 out/
 dist/
-build/
+/build/
 
 # Env & secrets
 .env
