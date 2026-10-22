@@ -1,0 +1,37 @@
+name: Nightly Unit Tests
+
+# Full engine unit suite (excludes the API-gated integration suite).
+# PRs run an impacted subset in ci.yml; this catches everything on a schedule.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: engine
+
+jobs:
+  unit:
+    name: Full unit suite
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Install dependencies
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun install --frozen-lockfile
+
+      - name: Run full unit suite
+        run: node ../scripts/tony/run-unit-tests.mjs

@@ -104,6 +104,7 @@ function main() {
     log("dry-run", "would rewrite pin references in docs/README/NOTICE");
     log("dry-run", "would run: node scripts/tony/audit-egress.mjs");
     log("dry-run", "would run: bun run setup && bun run check");
+    log("dry-run", "would run: node scripts/tony/run-unit-tests.mjs");
     log("dry-run", "re-run with --apply to perform the re-vendor");
     return;
   }
@@ -145,6 +146,12 @@ function main() {
   execSync("bun run setup", { cwd: repoRoot, stdio: "inherit" });
   log("verify", "running bun run check");
   execSync("bun run check", { cwd: repoRoot, stdio: "inherit" });
+
+  log("test", "running unit tests");
+  execSync("node scripts/tony/run-unit-tests.mjs", {
+    cwd: repoRoot,
+    stdio: "inherit",
+  });
 
   log("done", `re-vendored Letta Code ${args.to}. Review, then commit.`);
 }
