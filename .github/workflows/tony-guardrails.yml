@@ -37,3 +37,6 @@ jobs:
 
       - name: Pinned version references are consistent
         run: node scripts/tony/check-pins.mjs
+
+      - name: Egress & telemetry audit
+        run: node scripts/tony/audit-egress.mjs

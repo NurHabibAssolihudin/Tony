@@ -102,6 +102,7 @@ function main() {
     log("dry-run", "would replace engine/ with a fresh clone of the target tag");
     log("dry-run", "would re-apply localEdits (none currently)");
     log("dry-run", "would rewrite pin references in docs/README/NOTICE");
+    log("dry-run", "would run: node scripts/tony/audit-egress.mjs");
     log("dry-run", "would run: bun run setup && bun run check");
     log("dry-run", "re-run with --apply to perform the re-vendor");
     return;
@@ -136,6 +137,9 @@ function main() {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const changed = updatePinReferences({ ...manifest, upstream }, manifest.upstream);
   log("pin", `updated manifest + ${changed.length} file(s): ${changed.join(", ")}`);
+
+  log("audit", "running egress/telemetry audit (docs/13-security-audit.md)");
+  execSync("node scripts/tony/audit-egress.mjs", { cwd: repoRoot, stdio: "inherit" });
 
   log("install", "running bun run setup");
   execSync("bun run setup", { cwd: repoRoot, stdio: "inherit" });

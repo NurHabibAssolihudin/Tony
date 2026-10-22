@@ -1,0 +1,94 @@
+{
+  "$comment": "Curated egress/telemetry baseline for Tony. Consumed by scripts/tony/audit-egress.mjs. Any NEW host or missing marker fails the audit and must be reviewed + added here with a reason. See docs/13-security-audit.md.",
+  "scanRoots": ["engine/src", "docker", ".env.example"],
+  "ignoreGlobs": [
+    "engine/src/**/*.test.ts",
+    "engine/src/agent/prompts/**",
+    "**/*.md",
+    "**/node_modules/**"
+  ],
+  "allowHosts": [
+    "127.0.0.1",
+    "192.168.1.50",
+    "api.github.com",
+    "api.letta.com",
+    "api.openai.com",
+    "api.telegram.org",
+    "api.z.ai",
+    "app.letta.com",
+    "auth.openai.com",
+    "chat.letta.com",
+    "chatgpt.com",
+    "clawhub.ai",
+    "cli.github.com",
+    "discord.com",
+    "discord.gg",
+    "docs.letta.com",
+    "docs.rs",
+    "empanadaempire.us",
+    "files.slack.com",
+    "fonts.googleapis.com",
+    "github.com",
+    "huggingface.co",
+    "json-schema.org",
+    "letta.com",
+    "localhost",
+    "mcp.exa.ai",
+    "mcp.notion.com",
+    "oauth-cancellation.example",
+    "ollama.com",
+    "opencode.ai",
+    "order.online",
+    "platform.letta.com",
+    "raw.githubusercontent.com",
+    "registry.npmjs.org",
+    "signalcaptchas.org",
+    "status.claude.com",
+    "status.openai.com",
+    "sw.kovidgoyal.net",
+    "www.w3.org"
+  ],
+  "allowHostPatterns": [
+    "localhost",
+    "127.0.0.1",
+    "*.example.com",
+    "example.com",
+    "*.example.*",
+    "*.example",
+    "*.invalid",
+    "*.test",
+    "*.local",
+    "192.168.*",
+    "10.*",
+    "172.16.*"
+  ],
+  "comment_egressHosts": "Hosts actually contacted at runtime: api.letta.com (backend/telemetry/MemFS), app/chat/platform/docs.letta.com, github.com + api/raw/cli.github.com (repo + skills install), api.openai.com/auth.openai.com/chatgpt.com/status.openai.com, api.z.ai, opencode.ai, clawhub.ai, huggingface.co, ollama.com, registry.npmjs.org (updater), api.telegram.org/discord.com/discord.gg/files.slack.com/signalcaptchas.org (channels), mcp.notion.com/mcp.exa.ai (MCP examples).",
+  "comment_referenceHosts": "Not network egress: json-schema.org, www.w3.org, docs.rs, sw.kovidgoyal.net, status.claude.com, fonts.googleapis.com, and example/placeholder hosts.",
+  "markers": [
+    {
+      "file": "engine/src/telemetry/index.ts",
+      "contains": "LETTA_CODE_TELEM",
+      "note": "Telemetry opt-out env must remain available."
+    },
+    {
+      "file": "engine/src/telemetry/index.ts",
+      "contains": "DO_NOT_TRACK",
+      "note": "DO_NOT_TRACK opt-out must remain available."
+    },
+    {
+      "file": "engine/src/backend/api/metadata.ts",
+      "contains": "/v1/metadata/telemetry",
+      "note": "Telemetry egress endpoint."
+    },
+    {
+      "file": "engine/src/updater/auto-update.ts",
+      "contains": "DISABLE_AUTOUPDATER",
+      "note": "Auto-updater opt-out must remain available."
+    },
+    {
+      "file": "engine/package.json",
+      "contains": "@scarf/scarf",
+      "note": "Install-time analytics dependency (disable with SCARF_ANALYTICS=false or DO_NOT_TRACK=1)."
+    }
+  ]
+}
