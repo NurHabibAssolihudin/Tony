@@ -39,6 +39,10 @@ COPY --from=oven/bun:1.3 /usr/local/bin/bun /usr/local/bin/bun
 # Engine source (vendored under engine/)
 WORKDIR /app
 COPY engine/ ./
+
+# Disable install-time analytics during `bun install` (Scarf) — see docs/13-security-audit.md
+ENV DO_NOT_TRACK=1 \
+    SCARF_ANALYTICS=false
 RUN bun install --frozen-lockfile
 
 # Cron dirs used by the engine's scheduling feature
@@ -49,6 +53,11 @@ ENV LETTA_SYSTEM_CRON_DIR=/root/.letta/system-cron \
 ENV TERM=xterm-256color \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
+
+# Safe profile (privacy): no telemetry, no npm self-update by default.
+# See docs/13-security-audit.md. Override per-run if you need otherwise.
+ENV LETTA_CODE_TELEM=0 \
+    DISABLE_AUTOUPDATER=1
 
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/tony-entrypoint
 
