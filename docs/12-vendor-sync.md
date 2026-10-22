@@ -51,7 +51,8 @@ It will:
 3. replace `engine/` with the fresh clone,
 4. re-apply recorded `localEdits`,
 5. update `vendor-manifest.json` and the pinned version references,
-6. run `bun run setup` and `bun run check`.
+6. run the egress/telemetry audit (`docs/13-security-audit.md`),
+7. run `bun run setup` and `bun run check`.
 
 Manual equivalent:
 
@@ -60,23 +61,28 @@ git rm -rf engine
 git clone --depth 1 --branch vX.Y.Z https://github.com/letta-ai/letta-code engine
 # update the pin in docs/vendor-manifest.json + README.md, NOTICE, docs/02, 05, 07, docs/app/*.md
 # re-apply any localEdits
+node scripts/tony/audit-egress.mjs   # security: review any new egress (docs/13)
 bun run setup
 bun run check
 ```
 
 `docs/app/` is Tony-curated and must be synced by hand against the upstream
-release notes after a re-vendor (see ADR-011).
+release notes after a re-vendor (see ADR-011). For privacy, also run the
+re-vendor checklist in `docs/13-security-audit.md`.
 
 ## Guardrails
 
 `.github/workflows/tony-guardrails.yml` fails a change when:
 
-- `engine/vendor` is not tracked in git, or
+- `engine/vendor` is not tracked in git,
 - the pinned version references drift from `engine/package.json`
-  (`scripts/tony/check-pins.mjs`).
+  (`scripts/tony/check-pins.mjs`), or
+- new/unapproved outbound hosts or missing telemetry controls are detected
+  (`scripts/tony/audit-egress.mjs`, see `docs/13-security-audit.md`).
 
-Run the pin check locally:
+Run the checks locally:
 
 ```bash
 node scripts/tony/check-pins.mjs
+node scripts/tony/audit-egress.mjs
 ```

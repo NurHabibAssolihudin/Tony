@@ -97,6 +97,7 @@ Major development plan:
 | [10-eval-activepieces.md](docs/10-eval-activepieces.md) | Phase 2 "hands" evaluation |
 | [11-web-ui-design.md](docs/11-web-ui-design.md) | Web UI design draft (Face, self-config, open multi-user question) |
 | [12-vendor-sync.md](docs/12-vendor-sync.md) | Vendored engine ownership + safe re-vendor runbook |
+| [13-security-audit.md](docs/13-security-audit.md) | Data egress & telemetry audit, safe profile, guardrails |
 
 Native application documentation (`docs/app/`):
 
