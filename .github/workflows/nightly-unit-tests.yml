@@ -33,10 +33,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun install --frozen-lockfile
 
-      # Some isolated tests (e.g. MCP OAuth) use the system secret service.
-      - name: Unlock GNOME Keyring
-        if: runner.os == 'Linux'
-        uses: t1m0othyj/unlock-keyring@v1
-
       - name: Run full unit suite
         run: node ../scripts/tony/run-unit-tests.mjs
