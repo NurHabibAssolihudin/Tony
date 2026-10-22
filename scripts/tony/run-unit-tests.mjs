@@ -142,7 +142,9 @@ function runBunTest(targets, timeoutMs, extraEnv = {}) {
   execFileSync("bun", ["test", ...targets, "--timeout", String(timeoutMs)], {
     cwd: engineDir,
     stdio: "inherit",
-    env: { ...process.env, LETTA_CODE_TELEM: "0", DO_NOT_TRACK: "1", ...extraEnv },
+    // Default telemetry off for tests (matching upstream). Isolated telemetry
+    // contract tests opt back in via their manifest env (LETTA_CODE_TELEM=1).
+    env: { ...process.env, LETTA_CODE_TELEM: "0", ...extraEnv },
   });
 }
 
