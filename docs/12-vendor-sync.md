@@ -52,7 +52,8 @@ It will:
 4. re-apply recorded `localEdits`,
 5. update `vendor-manifest.json` and the pinned version references,
 6. run the egress/telemetry audit (`docs/13-security-audit.md`),
-7. run `bun run setup` and `bun run check`.
+7. run `bun run setup` and `bun run check`,
+8. run the full unit test suite (`node scripts/tony/run-unit-tests.mjs`).
 
 Manual equivalent:
 
@@ -64,6 +65,7 @@ git clone --depth 1 --branch vX.Y.Z https://github.com/letta-ai/letta-code engin
 node scripts/tony/audit-egress.mjs   # security: review any new egress (docs/13)
 bun run setup
 bun run check
+node scripts/tony/run-unit-tests.mjs  # full unit suite (excludes API integration tests)
 ```
 
 `docs/app/` is Tony-curated and must be synced by hand against the upstream

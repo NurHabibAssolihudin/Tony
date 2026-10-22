@@ -107,6 +107,41 @@ jobs:
   # removed. Tony runs the vendored engine from source in Docker and does not
   # distribute/self-update via npm, so that path is not exercised here.
 
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # PR selection needs the base/head SHAs.
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Install dependencies
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun install --frozen-lockfile
+
+      # Impacted unit tests on PRs; full unit suite on push to main.
+      # Integration tests (API-gated) are never run here.
+      - name: Run unit tests
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node ../scripts/tony/run-unit-tests.mjs --changed-only --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"
+          else
+            node ../scripts/tony/run-unit-tests.mjs
+          fi
+
   node18-smoke:
     needs: [classify, check]
     if: needs.classify.outputs.run_heavy_ci == 'true'

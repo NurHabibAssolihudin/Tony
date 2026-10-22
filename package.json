@@ -12,7 +12,8 @@
     "fix": "bun run --cwd engine fix",
     "build": "bun run --cwd engine build",
     "dev": "bun run --cwd engine dev",
-    "test": "bun run --cwd engine test"
+    "test": "node scripts/tony/run-unit-tests.mjs",
+    "test:changed": "node scripts/tony/run-unit-tests.mjs --changed-only"
   },
   "engines": {
     "node": ">=22.19.0"
