@@ -18,9 +18,9 @@ dist/
 .env.*.local
 !.env.example
 
-# Letta local state
+# Letta local state (runtime: MemFS, auth, provider keys) - never commit
+.letta/
 .letta-local/
-~/.letta/
 
 # Logs
 *.log
@@ -33,6 +33,9 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Local dev-tool state (personal AI/IDE preferences - not project code)
+.commandcode/
 
 # Misc
 coverage/
